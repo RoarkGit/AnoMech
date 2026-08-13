@@ -1,10 +1,10 @@
 [
   {
     "Author": "Anomek",
-    "Name": "AnoMech (Celestriad preview)",
+    "Name": "AnoMech (Preview)",
     "InternalName": "AnoMech",
-    "AssemblyVersion": "0.3.12.0",
-    "Description": "Spawns fake party members and bosses client-side so you can practice raid mechanics without a full party. This build adds the DMU P5 Celestriad scenario ahead of it merging upstream (anomek/AnoMech#21); switch back to the official repo once that PR lands.",
+    "AssemblyVersion": "0.3.12.1",
+    "Description": "Spawns fake party members and bosses client-side so you can practice raid mechanics without a full party. This build adds the DMU P5 Celestriad scenario (anomek/AnoMech#21) and a consecutive-success mechanic streak with optional auto-restart (anomek/AnoMech#22) ahead of them merging upstream; switch back to the official repo once those PRs land.",
     "ApplicableVersion": "any",
     "RepoUrl": "https://github.com/RoarkGit/AnoMech",
     "Tags": [
@@ -24,10 +24,10 @@
     "CanUnloadAsync": false,
     "LoadPriority": 0,
     "IconUrl": "https://raw.githubusercontent.com/anomek/AnoMech/master/images/icon.png",
-    "Punchline": "Another FFXIV mechanics simulator, with the Celestriad preview.",
+    "Punchline": "Another FFXIV mechanics simulator, with the Celestriad and mechanic-streak previews.",
     "AcceptsFeedback": true,
-    "DownloadLinkInstall": "https://github.com/RoarkGit/AnoMech/releases/download/celestriad-preview/latest.zip",
-    "DownloadLinkUpdate": "https://github.com/RoarkGit/AnoMech/releases/download/celestriad-preview/latest.zip",
-    "DownloadLinkTesting": "https://github.com/RoarkGit/AnoMech/releases/download/celestriad-preview/latest.zip"
+    "DownloadLinkInstall": "https://github.com/RoarkGit/AnoMech/releases/download/preview/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/RoarkGit/AnoMech/releases/download/preview/latest.zip",
+    "DownloadLinkTesting": "https://github.com/RoarkGit/AnoMech/releases/download/preview/latest.zip"
   }
 ]
