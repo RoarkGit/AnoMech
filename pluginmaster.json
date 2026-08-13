@@ -3,7 +3,7 @@
     "Author": "Anomek",
     "Name": "AnoMech (Celestriad preview)",
     "InternalName": "AnoMech",
-    "AssemblyVersion": "0.3.12.1",
+    "AssemblyVersion": "0.3.12.0",
     "Description": "Spawns fake party members and bosses client-side so you can practice raid mechanics without a full party. This build adds the DMU P5 Celestriad scenario ahead of it merging upstream (anomek/AnoMech#21); switch back to the official repo once that PR lands.",
     "ApplicableVersion": "any",
     "RepoUrl": "https://github.com/RoarkGit/AnoMech",
