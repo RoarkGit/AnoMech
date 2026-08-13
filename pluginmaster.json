@@ -1,0 +1,33 @@
+[
+  {
+    "Author": "Anomek",
+    "Name": "AnoMech (Celestriad preview)",
+    "InternalName": "AnoMech",
+    "AssemblyVersion": "0.3.12.1",
+    "Description": "Spawns fake party members and bosses client-side so you can practice raid mechanics without a full party. This build adds the DMU P5 Celestriad scenario ahead of it merging upstream (anomek/AnoMech#21); switch back to the official repo once that PR lands.",
+    "ApplicableVersion": "any",
+    "RepoUrl": "https://github.com/RoarkGit/AnoMech",
+    "Tags": [
+      "top",
+      "umad",
+      "dmu",
+      "kefka",
+      "omega",
+      "protocol",
+      "ultimate",
+      "practice",
+      "simulator"
+    ],
+    "DalamudApiLevel": 15,
+    "LoadRequiredState": 0,
+    "LoadSync": false,
+    "CanUnloadAsync": false,
+    "LoadPriority": 0,
+    "IconUrl": "https://raw.githubusercontent.com/anomek/AnoMech/master/images/icon.png",
+    "Punchline": "Another FFXIV mechanics simulator, with the Celestriad preview.",
+    "AcceptsFeedback": true,
+    "DownloadLinkInstall": "https://github.com/RoarkGit/AnoMech/releases/download/celestriad-preview/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/RoarkGit/AnoMech/releases/download/celestriad-preview/latest.zip",
+    "DownloadLinkTesting": "https://github.com/RoarkGit/AnoMech/releases/download/celestriad-preview/latest.zip"
+  }
+]
