@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Numerics;
 using AnoMech.Core.Game;
 using AnoMech.Core.Game.Ai;
+using AnoMech.Core.Game.Party;
 using AnoMech.Core.SimObjects;
 using static AnoMech.Scenarios.Umad.UmadConstants;
 using static AnoMech.Scenarios.Umad.P5Celestriad.UmadP5CelestriadConstants;
@@ -34,6 +36,7 @@ public sealed class UmadP5CelestriadScenario : IScenario
     private UmadP5CelestriadState state = null!;
     private SimWorld world = null!;
     private SimParty party = null!;
+    private DamageSolver damage = null!;
     private SimEnemy? kefka;
     private readonly Dictionary<(CelestriadElement, int), SimEventObject> towerObjects = new();
     private readonly Dictionary<(CelestriadElement, int), SimEventObject> activeOverlays = new();
@@ -44,6 +47,7 @@ public sealed class UmadP5CelestriadScenario : IScenario
         world = worldParam;
         party = worldParam.Party;
         state = new UmadP5CelestriadState(party, settingsWindow.Overrides);
+        damage = new DamageSolver(party);
         towerObjects.Clear();
         activeOverlays.Clear();
         towerMarkers.Clear();
@@ -63,6 +67,7 @@ public sealed class UmadP5CelestriadScenario : IScenario
             world.Events.Add(CelestriadTiming.TowerStart[s], () => ActivateTowers(s));
             if (CelestriadTiming.CcAt[s] is { } cc) world.Events.Add(cc, () => LaunchChoice(s));
             world.Events.Add(CelestriadTiming.ResolveAt[s], () => ResolveSet(s));
+            world.Events.Add(CelestriadTiming.ResolveAt[s], () => SpawnChoiceOmen(s));
             world.Events.Add(CelestriadTiming.DeactivateAt[s], () => DeactivateTowers(s));
         }
 
@@ -95,17 +100,26 @@ public sealed class UmadP5CelestriadScenario : IScenario
         }
     }
 
-    // One cast per applicable set; that set resolves exactly when this cast completes. The
-    // green donut / black circle is duty-scripted decoration in retail, not part of the
-    // action's own release animation, so it needs its own telegraph spawn (matching
-    // TopUtils.ResolveOpticalLaser's pattern for the same kind of scripted-visual gap) rather
-    // than relying on the cast to produce it.
+    // One cast per applicable set; that set resolves exactly when this cast completes.
     private void LaunchChoice(int set)
     {
         if (state.AeroVariant[set] is not { } aero || kefka is null) return;
         var actionId = aero ? CelestriadActionId.CatastrophicChoiceAero : CelestriadActionId.CatastrophicChoiceEarth;
         kefka.Cast(actionId, castSeconds: CelestriadTiming.CatastrophicChoiceCastTime);
-        world.SpawnActionOmen(actionId, Vector3.Zero, kefka.Rotation, CelestriadTiming.CatastrophicChoiceCastTime);
+    }
+
+    // The green donut / black circle is duty-scripted decoration in retail, not part of the
+    // action's own release animation, so it needs its own spawn (matching
+    // TopUtils.ResolveOpticalLaser's pattern for the same kind of scripted-visual gap) rather
+    // than relying on the cast to produce it. Fired at resolution, not cast start, matching
+    // ResolveOpticalLaser's own timing: this flashes the result over the affected zone rather
+    // than acting as an advance telegraph (players read Aero/Earth from the cast itself, not
+    // from this), same as the tower resolve VFX right below it.
+    private void SpawnChoiceOmen(int set)
+    {
+        if (state.AeroVariant[set] is not { } aero || kefka is null) return;
+        var actionId = aero ? CelestriadActionId.CatastrophicChoiceAero : CelestriadActionId.CatastrophicChoiceEarth;
+        world.SpawnActionOmen(actionId, Vector3.Zero, kefka.Rotation, durationSeconds: 1.5f);
     }
 
     // Real tower props (EObjId per UmadP5CelestriadConstants), not a cast/omen. All 9 spawn once
@@ -147,13 +161,13 @@ public sealed class UmadP5CelestriadScenario : IScenario
 
     private void ActivateTowers(int set)
     {
-        foreach (var active in state.SetActiveTowers[set])
+        foreach (var tower in state.SetActiveTowers[set])
         {
-            var key = (active.Tower.Element, active.Tower.SubIndex);
+            var key = (tower.Element, tower.SubIndex);
             var overlay = world.SpawnEventObject(new EventObjectSpawnConfig
             {
-                EObjId = TowerEObjId(active.Tower.Element),
-                Placement = new Placement(active.Tower.Position, 0f),
+                EObjId = TowerEObjId(tower.Element),
+                Placement = new Placement(tower.Position, 0f),
                 TimelineState = CelestriadTowerEObjId.ActiveState,
             });
             if (overlay is not null) activeOverlays[key] = overlay;
@@ -162,9 +176,9 @@ public sealed class UmadP5CelestriadScenario : IScenario
 
     private void DeactivateTowers(int set)
     {
-        foreach (var active in state.SetActiveTowers[set])
+        foreach (var tower in state.SetActiveTowers[set])
         {
-            var key = (active.Tower.Element, active.Tower.SubIndex);
+            var key = (tower.Element, tower.SubIndex);
             if (activeOverlays.Remove(key, out var overlay))
                 overlay.Despawn();
         }
@@ -183,35 +197,51 @@ public sealed class UmadP5CelestriadScenario : IScenario
         marker.Cast(ElementAction(tower.Element), castSeconds: 0f, targetId: marker.GameObjectId);
     }
 
+    // The scenario's own ruleset resolution: independent of how the AI chose to distribute
+    // players across a doubled element's 2 towers, only the aggregate per-element outcome
+    // matters here. RequiredRoles below is a scenario-ruleset fact derived straight from
+    // state's raw randomness (who's debuffed, who's free, which element doubles), not a
+    // strategy decision, so the scenario can resolve independently of the AI's own logic.
     private void ResolveSet(int set)
     {
         var anyUnsoaked = false;
-        foreach (var active in state.SetActiveTowers[set])
+        foreach (var group in state.SetActiveTowers[set].GroupBy(t => t.Element))
         {
-            var tower = active.Tower;
-            var inside = party.Find.InsideCircle(tower.Position, CelestriadGeometry.SoakRadius);
-            if (inside.Count < 2)
+            var required = RequiredRoles(group.Key, set).ToHashSet();
+            var present = new HashSet<PartyRole>();
+
+            foreach (var tower in group)
             {
-                anyUnsoaked = true;
-                // Hard failure: whoever was assigned here dies, whether they showed up or not,
-                // on top of the party-wide penalty below.
-                foreach (var role in state.AssignedRoles(active, set))
-                    party.Get(role)?.Die("Celestriad, tower unsoaked");
+                // DamageSolver kills whoever's physically present if the tower comes up short
+                // (stackMinTargets), and applies the element's resistance-down to survivors.
+                var soakers = damage.Resolve(towerMarkers.GetValueOrDefault((tower.Element, tower.SubIndex)),
+                    ElementAction(tower.Element), [], [(ElementDebuff(tower.Element), CelestriadTiming.DebuffDuration)],
+                    stackMinTargets: 2, size: CelestriadGeometry.SoakRadius);
+                if (soakers.Count < 2) anyUnsoaked = true;
+                foreach (var soaker in soakers)
+                    if (soaker is ISimPartyMember pm) present.Add(pm.Role);
+
+                PlayResolveEffect(tower);
             }
 
-            PlayResolveEffect(tower);
+            // Hard failure: anyone required for this element who wasn't found at any of its
+            // active towers this set dies, whether they showed up short-handed or not at all,
+            // on top of the party-wide penalty below.
+            foreach (var role in required.Except(present))
+            {
+                anyUnsoaked = true;
+                party.Get(role)?.Die("Celestriad, tower unsoaked");
+            }
+        }
 
-            // Soaking a tower gives its element's resistance-down, independent of whoever was
-            // originally debuffed with it.
-            foreach (var soaker in inside)
-                soaker.AddStatus(ElementDebuff(tower.Element), CelestriadTiming.DebuffDuration);
-
-            // Wrong-half Catastrophic Choice is a personal hit (death), not a party-wide
-            // penalty; that's reserved for an unsoaked tower, checked above.
-            if (state.AeroVariant[set] is { } aero)
-                foreach (var p in inside)
-                    if (!IsSafeHalf(p.Position, tower.Position, aero))
-                        p.Die("Catastrophic Choice");
+        // Wrong-half Catastrophic Choice is a personal hit (death), not a party-wide penalty;
+        // that's reserved for an unsoaked tower, checked above. Arena-wide (not per-tower):
+        // DamageSolver reads the real safe/danger split straight off the action's own sheet
+        // data (CastType/EffectRange), rather than an approximated distance-from-centre check.
+        if (state.AeroVariant[set] is { } aero && kefka is not null)
+        {
+            var actionId = aero ? CelestriadActionId.CatastrophicChoiceAero : CelestriadActionId.CatastrophicChoiceEarth;
+            damage.Resolve(kefka, actionId, [DamageType.Lethal], []);
         }
 
         if (!anyUnsoaked) return;
@@ -221,6 +251,19 @@ public sealed class UmadP5CelestriadScenario : IScenario
             if (member is null || !member.IsAlive()) continue;
             member.AddStatus(StatusId.DamageDown, CelestriadTiming.DamageDownDuration);
         }
+    }
+
+    // Every player required to be somewhere among element's active towers this set: the 2
+    // players whose cycling debuff currently points at element, plus (only when element is
+    // this set's doubled element) the 2 free players filling its second tower.
+    private IEnumerable<PartyRole> RequiredRoles(CelestriadElement element, int set)
+    {
+        var debuffed = state.PlayerDebuffElement
+            .Where(kv => kv.Value is not null && state.ElementForSet(kv.Key, set) == element)
+            .Select(kv => kv.Key);
+        if (element != state.DoubleElement[set]) return debuffed;
+        var free = state.PlayerDebuffElement.Where(kv => kv.Value is null).Select(kv => kv.Key);
+        return debuffed.Concat(free);
     }
 
     private void DespawnAllTowers()
@@ -233,14 +276,6 @@ public sealed class UmadP5CelestriadScenario : IScenario
         towerMarkers.Clear();
     }
 
-    // Aero (green): safe half is away from the boss/centre. Earth (brown): safe half is toward
-    // the boss/centre.
-    private static bool IsSafeHalf(Vector3 playerPos, Vector3 towerPos, bool aero)
-    {
-        var inward = -Vector3.Normalize(towerPos);
-        var dot = Vector3.Dot(playerPos - towerPos, inward);
-        return aero ? dot < 0f : dot > 0f;
-    }
 
     private static uint TowerEObjId(CelestriadElement e) => e switch
     {

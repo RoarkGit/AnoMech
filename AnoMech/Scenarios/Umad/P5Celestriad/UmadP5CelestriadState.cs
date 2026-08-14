@@ -15,15 +15,17 @@ public enum CelestriadElement { Fire, Lightning, Ice }
 // One of the 9 fixed towers, spawned once for the whole mechanic; position never changes.
 public sealed record CelestriadTower(CelestriadElement Element, int SubIndex, Vector3 Position);
 
-// A tower that's active (lit) this set. IsFreeTower marks the doubled element's second active
-// tower, the one the two undebuffed players fill, rather than that element's own dedicated pair.
-public sealed record CelestriadActiveTower(CelestriadTower Tower, bool IsFreeTower);
-
 // Per-run randomization: which element (or "free") each party role is permanently debuffed
 // with, which element doubles up on each of the 3 sets, which of its 3 ring towers are active,
 // and (sets 0 and 2 only, the 1st and 3rd soaks) whether that set's single Catastrophic Choice
 // is Aero (green, safe toward centre) or Earth (brown, safe away from centre). ElementForSet
 // derives each role's actual per-set soak target from its debuff.
+//
+// Deliberately has no notion of which specific player goes to which specific active tower
+// within a doubled element's pair, or who's "responsible" for a tower failing: that's a
+// strategy decision (the AI's job, see UmadP5CelestriadAi) and a scenario-ruleset resolution
+// decision (the scenario's job, see UmadP5CelestriadScenario.ResolveSet), not a fact of the
+// randomization itself. State only ever exposes what's actually random.
 public sealed class UmadP5CelestriadState
 {
     private readonly Rng rng = new();
@@ -40,22 +42,13 @@ public sealed class UmadP5CelestriadState
     public IReadOnlyDictionary<PartyRole, CelestriadElement?> PlayerDebuffElement { get; }
     public IReadOnlyList<CelestriadElement> DoubleElement { get; }
     public IReadOnlyList<CelestriadTower> AllTowers { get; }
-    public IReadOnlyList<IReadOnlyList<CelestriadActiveTower>> SetActiveTowers { get; }
+    public IReadOnlyList<IReadOnlyList<CelestriadTower>> SetActiveTowers { get; }
     public IReadOnlyList<bool?> AeroVariant { get; }
 
     // The element this role should physically soak at this set. NOT the same as their permanent
     // debuff except in set 2. Free (undebuffed) players always fill in for the doubled element.
     public CelestriadElement ElementForSet(PartyRole role, int set) =>
         PlayerDebuffElement[role] is { } own ? (CelestriadElement)(((int)own + SetOffset[set]) % 3) : DoubleElement[set];
-
-    // The two roles that belong at this active tower this set. Shared by the AI (where to send
-    // bots) and the resolve check (who to penalize if the tower ends up unsoaked).
-    public IEnumerable<PartyRole> AssignedRoles(CelestriadActiveTower active, int set) =>
-        PlayerDebuffElement
-            .Where(kv => active.IsFreeTower
-                ? kv.Value is null
-                : kv.Value is not null && ElementForSet(kv.Key, set) == active.Tower.Element)
-            .Select(kv => kv.Key);
 
     public UmadP5CelestriadState(SimParty party, UmadP5CelestriadStateOverrides overrides)
     {
@@ -92,22 +85,20 @@ public sealed class UmadP5CelestriadState
                 allTowers.Add(new CelestriadTower(element, sub, TowerPosition(element, sub)));
         AllTowers = allTowers;
 
-        var setActive = new List<IReadOnlyList<CelestriadActiveTower>>(3);
+        var setActive = new List<IReadOnlyList<CelestriadTower>>(3);
         var aero = new List<bool?>(3);
         for (var set = 0; set < 3; set++)
         {
-            var active = new List<CelestriadActiveTower>(4);
+            var active = new List<CelestriadTower>(4);
             foreach (var element in Elements)
             {
                 var elementTowers = allTowers.Where(t => t.Element == element).ToArray();
                 var isDouble = element == DoubleElement[set];
-                // Which sub-towers light up is random; which is "first"/"second" clockwise in
-                // the pair is not. Sort ascending so the debuffed pair always gets the
-                // clockwise-first active tower and the free pair always gets the clockwise-second.
+                // Which sub-towers light up is random; sorted ascending so a doubled element's
+                // pair always lists in a stable, deterministic clockwise order for whoever reads
+                // "first" vs "second" out of it (the AI, when deciding who goes where).
                 var subs = rng.Shuffle(0, 1, 2).Take(isDouble ? 2 : 1).OrderBy(s => s).ToArray();
-                active.Add(new CelestriadActiveTower(elementTowers[subs[0]], false));
-                if (isDouble)
-                    active.Add(new CelestriadActiveTower(elementTowers[subs[1]], true));
+                active.AddRange(subs.Select(s => elementTowers[s]));
             }
             setActive.Add(active);
             aero.Add(ResolveAero(set, overrides));
