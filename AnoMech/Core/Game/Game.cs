@@ -65,10 +65,7 @@ public sealed class Game : IDisposable
     // cancels it (set false directly in Kill) rather than restarting past a failure the
     // freeze/overlay exists to let the user actually see.
     public bool AutoRestart { get; set; }
-    private IScenario? lastRunScenario;
-    private PartyRole? lastRunRoleOverride;
-    private int? lastRunSelectedAi;
-    private int lastRunSelectedWaymark;
+    private RunScenarioParams? lastRun;
 
     // Consecutive successful completions of whatever scenario is currently active. Reset by
     // Kill on any real (non-godmode) death and by RunScenarioInternal when a different
@@ -149,12 +146,12 @@ public sealed class Game : IDisposable
     // solo (no doppels, no AI). Defaults to 0 = run the first strat with a full party.
     // selectedWaymark: index into the scenario's WaymarkPresets; ignored when it has none.
     public void RunScenario(IScenario scenario, PartyRole? roleOverride = null, int? selectedAi = 0, int selectedWaymark = 0)
+        => RunScenario(new RunScenarioParams(scenario, roleOverride, selectedAi, selectedWaymark));
+
+    private void RunScenario(RunScenarioParams p)
     {
-        lastRunScenario = scenario;
-        lastRunRoleOverride = roleOverride;
-        lastRunSelectedAi = selectedAi;
-        lastRunSelectedWaymark = selectedWaymark;
-        Plugin.Framework.Run(() => RunScenarioInternal(scenario, roleOverride, selectedAi, selectedWaymark));
+        lastRun = p;
+        Plugin.Framework.Run(() => RunScenarioInternal(p.Scenario, p.RoleOverride, p.SelectedAi, p.SelectedWaymark));
     }
 
     // The selected preset, or [0] as the default.
@@ -283,8 +280,8 @@ public sealed class Game : IDisposable
         mechanicResultReported = true;
         if (deathOccurredThisRun) return;
         MechanicStreak++;
-        if (AutoRestart && lastRunScenario is { } scenario)
-            RunScenario(scenario, lastRunRoleOverride, lastRunSelectedAi, lastRunSelectedWaymark);
+        if (AutoRestart && lastRun is { } p)
+            RunScenario(p);
     }
 
     // Godmode preview: how long a swallowed-death HP-bar drop stays down before healing back.
@@ -451,3 +448,7 @@ public sealed class Game : IDisposable
         opcodeUpdater.Dispose();
     }
 }
+
+// A single RunScenario call's arguments, bundled so Game can replay the exact same run (see
+// AutoRestart) without tracking each argument as its own field.
+public sealed record RunScenarioParams(IScenario Scenario, PartyRole? RoleOverride, int? SelectedAi, int SelectedWaymark);
