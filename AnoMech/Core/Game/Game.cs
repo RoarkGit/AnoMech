@@ -18,6 +18,7 @@ using AnoMech.Scenarios.Umad.P2Forsaken;
 using AnoMech.Scenarios.Umad.P3BlackHole;
 using AnoMech.Scenarios.Umad.P3LimitCut;
 using AnoMech.Scenarios.Umad.P4KefkaSays;
+using AnoMech.Scenarios.Ucob.P4Adds;
 using AnoMech.Scenarios.Ucob.P5Exaflares;
 using AnoMech.Scenarios.Umad.P5Celestriad;
 using AnoMech.Scenarios.Umad.P5Exaflares;
@@ -159,6 +160,7 @@ public sealed class Game : IDisposable
             new TopP6WaveCannon2Scenario(),
             new UltimatePredationScenario(),
             new UltimateSuppressionScenario(),
+            new UcobP4AddsScenario(),
             new UcobP5ExaflaresScenario()
         };
 

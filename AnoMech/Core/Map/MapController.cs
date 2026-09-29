@@ -1,5 +1,6 @@
 using AnoMech.Helpers;
 using FFXIVClientStructs.FFXIV.Client.LayoutEngine;
+using FFXIVClientStructs.FFXIV.Client.LayoutEngine.Group;
 using System;
 using System.Collections.Generic;
 using System.Numerics;
@@ -14,8 +15,10 @@ public sealed unsafe class MapController : IDisposable
     private readonly MapEffects effects = new();
     private readonly ZoneSession zone = new();
 
-    // Layout instances forced inactive for the run's lifetime — see SuppressLayer.
-    private readonly List<nint> suppressedLayerInstances = new();
+    // Layers whose instances are forced on or off every tick — see SuppressLayer / ForceLayerActive.
+    private readonly Dictionary<ushort, (bool Active, List<nint> Instances)> layerOverrides = new();
+    private readonly List<(nint Sg, uint ResetIndex)> playedTimelines = new();
+    private readonly Dictionary<nint, bool> instanceOverrides = new();
     // The engine brings layers up over several seconds, so one reading can't tell a slow load
     // from one that never completes.
     private int layerDumpFrame;
@@ -135,27 +138,102 @@ public sealed unsafe class MapController : IDisposable
         pendingDirectorUpdates.Clear();
         suppressedArenaSlots.Clear();
         effects.ForgetSuppressions();
-        suppressedLayerInstances.Clear();
         layerDumpFrame = int.MaxValue;
+        layerOverrides.Clear();
+        playedTimelines.Clear();
+        instanceOverrides.Clear();
     }
 
-    // Forces one native LGB layer's instances inactive for as long as the zone stays loaded.
-    // Some zones' client-side load activates every layer at once (there is no real duty
-    // director selecting the current phase's), so competing geometry from different phases can
-    // render in the same space and z-fight. A one-shot SetActive doesn't stick — the engine
-    // reconciles it back within a frame or two — so this re-asserts every tick until Unload.
-    public void SuppressLayer(ushort layerKey)
+    // Forces one native LGB layer's instances inactive or active until the next scenario reset.
+    // With no real duty director, a client-side zone load leaves the per-phase layers in
+    // whatever state the load picked, so geometry from different phases can compete or be
+    // missing entirely. A one-shot SetActive doesn't stick — the engine reconciles it back
+    // within a frame or two — so the override is re-asserted every tick.
+    public void SuppressLayer(ushort layerKey) => ForceLayer(layerKey, false);
+
+    // Forces a layer on but keeps only the instances whose asset path ends with one of
+    // `keepSuffixes`; the rest of the layer is forced off.
+    public void ForceLayerOnly(ushort layerKey, params string[] keepSuffixes)
+    {
+        var kept = 0;
+        foreach (var ptr in LayoutQuery.CollectLayerInstances(layerKey))
+        {
+            var path = LayoutQuery.PathOf((ILayoutInstance*)ptr);
+            var keep = Array.Exists(keepSuffixes, s => path.EndsWith(s, StringComparison.OrdinalIgnoreCase));
+            instanceOverrides[ptr] = keep;
+            if (keep) kept++;
+        }
+        DiagnosticLog.Info($"[MapController] Layer 0x{layerKey:X4}: keeping {kept} instance(s) matching {string.Join(", ", keepSuffixes)}, rest forced inactive");
+    }
+    public void ForceLayerActive(ushort layerKey) => ForceLayer(layerKey, true);
+
+    // Called on scenario reset so one phase's arena doesn't leak into the next scenario.
+    public void ResetLayoutOverrides()
+    {
+        layerOverrides.Clear();
+        instanceOverrides.Clear();
+        foreach (var (sg, resetIndex) in playedTimelines)
+            PlayTimelineIfValid((SharedGroupLayoutInstance*)sg, resetIndex);
+        playedTimelines.Clear();
+    }
+
+    // Per-instance force on/off (null clears), re-asserted every tick after the layer overrides
+    // so a single instance can be toggled inside a forced layer. Used by the debug inspector.
+    public void SetInstanceOverride(nint instance, bool? active)
+    {
+        if (active is { } a) instanceOverrides[instance] = a;
+        else instanceOverrides.Remove(instance);
+    }
+
+    public bool? GetInstanceOverride(nint instance)
+        => instanceOverrides.TryGetValue(instance, out var a) ? a : null;
+
+    public void PlaySharedGroupTimeline(nint sharedGroup, uint index)
+        => PlayTimelineIfValid((SharedGroupLayoutInstance*)sharedGroup, index);
+
+    // Plays one of a layout-placed SharedGroup's own timelines (the looping scenery a real
+    // duty's director would switch on). `resetIndex` is played on the next scenario reset.
+    public bool PlaySharedGroupTimeline(string sgbPath, uint index, uint resetIndex)
+    {
+        var sg = LayoutQuery.FindBySgbPath(sgbPath);
+        if (sg == null)
+        {
+            DiagnosticLog.Warn($"[MapController] SharedGroup {sgbPath} not found in the active layout");
+            return false;
+        }
+        if (!PlayTimelineIfValid(sg, index)) return false;
+        if (!playedTimelines.Exists(p => p.Sg == (nint)sg))
+            playedTimelines.Add(((nint)sg, resetIndex));
+        return true;
+    }
+
+    private static bool PlayTimelineIfValid(SharedGroupLayoutInstance* sg, uint index)
+    {
+        if (!sg->IsTimelineIndexValid(index))
+        {
+            DiagnosticLog.Warn($"[MapController] SharedGroup timeline index {index} is not valid");
+            return false;
+        }
+        sg->PlayTimeline(index, 0);
+        DiagnosticLog.Info($"[MapController] Played SharedGroup timeline {index}");
+        return true;
+    }
+
+    private void ForceLayer(ushort layerKey, bool active)
     {
         var instances = LayoutQuery.CollectLayerInstances(layerKey);
-        suppressedLayerInstances.AddRange(instances);
-        DiagnosticLog.Info($"[MapController] Suppressed layer 0x{layerKey:X} -- {instances.Count} instances.");
+        layerOverrides[layerKey] = (active, instances);
+        DiagnosticLog.Info($"[MapController] Layer 0x{layerKey:X4}: forcing {(active ? "active" : "inactive")} on {instances.Count} instances");
     }
 
     // Per-frame poll. Called from SimWorld.Tick.
     internal void Tick()
     {
-        foreach (var ptr in suppressedLayerInstances)
-            ((ILayoutInstance*)ptr)->SetActive(false);
+        foreach (var (active, instances) in layerOverrides.Values)
+            foreach (var ptr in instances)
+                ((ILayoutInstance*)ptr)->SetActive(active);
+        foreach (var (ptr, active) in instanceOverrides)
+            ((ILayoutInstance*)ptr)->SetActive(active);
 
         if (IsInInstance && layerDumpFrame <= LayerDumpFrames[^1])
         {

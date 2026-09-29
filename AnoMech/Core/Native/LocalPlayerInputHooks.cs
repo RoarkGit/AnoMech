@@ -13,6 +13,7 @@ using Dalamud.Utility.Signatures;
 using FFXIVClientStructs.FFXIV.Client.Game;
 using FFXIVClientStructs.FFXIV.Client.Game.Character;
 using FFXIVClientStructs.FFXIV.Client.Game.Gauge;
+using FFXIVClientStructs.FFXIV.Client.Game.Control;
 using FFXIVClientStructs.FFXIV.Client.Game.UI;
 using FFXIVClientStructs.FFXIV.Client.System.Input;
 
@@ -52,6 +53,15 @@ public sealed unsafe class LocalPlayerInputHooks : IDisposable
 
     // Latched on a real action press; drained once per frame by SimPlayer.
     private bool actionUsedSincePoll;
+
+    // The most recent action the player tried to use, recorded before the game validates it:
+    // a real action aimed at a simulated enemy (e.g. Provoke on a doppel boss) is refused
+    // client-side, but the attempt is still what a scenario wants to react to. Scenarios poll
+    // and compare ActionAttemptSequence to spot new attempts without subscribing.
+    public uint LastAttemptedActionId { get; private set; }
+    public ulong LastAttemptedActionTarget { get; private set; }
+    public int ActionAttemptSequence { get; private set; }
+
     public bool PollActionUsed()
     {
         var used = actionUsedSincePoll;
@@ -403,6 +413,8 @@ public sealed unsafe class LocalPlayerInputHooks : IDisposable
     {
         RecordRecentAction(actionId, actionType);
         if (DisableAllActions && !IsStopAutosAction(actionType, actionId)) return false;
+        if (actionType == ActionType.Action)
+            RecordAttempt(actionId, targetId);
         var limitBreakLevel = LimitBreakLevel(actionType, actionId);
         if (limitBreakLevel is { } level && RefuseLimitBreak(level, actionId)) return false;
         if (limitBreakLevel is null && actionType == ActionType.Action && TryInterceptTankMitigation(actionId, targetId))
@@ -586,6 +598,19 @@ public sealed unsafe class LocalPlayerInputHooks : IDisposable
             ActionExecuted?.Invoke(actionType, actionId);
         }
         return result;
+    }
+
+    // Hotbar presses pass 0xE0000000 and let the game resolve the current target.
+    private void RecordAttempt(uint actionId, ulong targetId)
+    {
+        if ((uint)targetId == 0xE0000000)
+        {
+            var target = TargetSystem.Instance()->Target;
+            targetId = target == null ? 0xE0000000 : (ulong)target->GetGameObjectId();
+        }
+        LastAttemptedActionId = actionId;
+        LastAttemptedActionTarget = targetId;
+        ActionAttemptSequence++;
     }
 
     // Lets the auto-cancel UseAction from UpdateDetour through; everything else

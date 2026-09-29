@@ -32,11 +32,14 @@ internal sealed unsafe class DebugMenu
 {
     private readonly Plugin plugin;
 
+    private readonly LayoutInspector layoutInspector;
+
     public DebugMenu(Plugin plugin)
     {
         this.plugin = plugin;
         // The position log samples off the framework tick, not this window's draw cadence.
         Plugin.Framework.Update += OnFrameworkUpdate;
+        layoutInspector = new LayoutInspector(plugin);
     }
 
     public void Dispose()
@@ -231,6 +234,13 @@ internal sealed unsafe class DebugMenu
 
         if (ImGui.Button("Damage debug window"))
             DamageDebugWindow.Instance!.Toggle();
+
+        if (ImGui.CollapsingHeader("Layout inspector"))
+        {
+            ImGui.Indent();
+            layoutInspector.Draw();
+            ImGui.Unindent();
+        }
 
         ImGui.Spacing();
         DrawPositionLogger();
