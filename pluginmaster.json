@@ -3,8 +3,8 @@
     "Author": "Anomek",
     "Name": "AnoMech (Celestriad preview)",
     "InternalName": "AnoMech",
-    "AssemblyVersion": "0.3.12.0",
-    "Description": "Spawns fake party members and bosses client-side so you can practice raid mechanics without a full party. This build adds the DMU P5 Celestriad scenario ahead of it merging upstream (anomek/AnoMech#21); switch back to the official repo once that PR lands.",
+    "AssemblyVersion": "0.4.2.1",
+    "Description": "Spawns fake party members and bosses client-side so you can practice raid mechanics without a full party. This preview build tracks the official AnoMech release and adds the UCOB P4 Adds scenario (Twintania and Nael deus Darnus: Hatch into the Neurolinks, Twisters, Nael's quotes, Liquid Hell, and tank swaps that follow your Provoke) plus corrected UCOB arena layouts, ahead of them merging upstream. Switch back to the official repo once they land.",
     "ApplicableVersion": "any",
     "RepoUrl": "https://github.com/RoarkGit/AnoMech",
     "Tags": [
@@ -16,7 +16,10 @@
       "protocol",
       "ultimate",
       "practice",
-      "simulator"
+      "simulator",
+      "ucob",
+      "twintania",
+      "nael"
     ],
     "DalamudApiLevel": 15,
     "LoadRequiredState": 0,
@@ -24,7 +27,7 @@
     "CanUnloadAsync": false,
     "LoadPriority": 0,
     "IconUrl": "https://raw.githubusercontent.com/anomek/AnoMech/master/images/icon.png",
-    "Punchline": "Another FFXIV mechanics simulator, with the Celestriad preview.",
+    "Punchline": "Another FFXIV mechanics simulator, with the UCOB P4 Adds preview.",
     "AcceptsFeedback": true,
     "DownloadLinkInstall": "https://github.com/RoarkGit/AnoMech/releases/download/celestriad-preview/latest.zip",
     "DownloadLinkUpdate": "https://github.com/RoarkGit/AnoMech/releases/download/celestriad-preview/latest.zip",
