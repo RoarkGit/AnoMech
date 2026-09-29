@@ -11,7 +11,9 @@ public class UcobConstants
 
     public static class Geometry
     {
-        public const float ArenaRadius = 21f;
+        // Kill radius, not the visible edge: players can stand against the edge at 21-21.3y,
+        // and only knockbacks carry anyone past it.
+        public const float ArenaRadius = 22f;
     }
 
     // "Aether Markers": A/B/C on the rim, D and 1-4 inside. Scenario-local == world here,
@@ -30,6 +32,9 @@ public class UcobConstants
 
     public class BNpcBaseId
     {
+        public const uint Twintania = 0x1FDF;
+        public const uint Oviform = 0x1FE0;
+        public const uint NaelDeusDarnus = 0x1FE1;
         public const uint BahamutPrime = 0x1FE8;
         // The fight's generic invisible caster (x42 in the instance): AOE source for
         // everything the boss doesn't cast from its own body.
@@ -46,6 +51,9 @@ public class UcobConstants
 
     public class BNpcNameId
     {
+        public const uint Twintania = 1482;
+        public const uint Oviform = 2210;
+        public const uint NaelDeusDarnus = 2612;
         public const uint BahamutPrime = 3210;
     }
 

@@ -187,6 +187,15 @@ internal static unsafe class LayoutQuery
         return best;
     }
 
+    // Asset path of any layout instance: SharedGroups carry theirs on the ResourceHandle,
+    // everything else (BG models, VFX) answers GetPrimaryPath.
+    public static string PathOf(ILayoutInstance* inst)
+    {
+        if (inst->Id.Type == InstanceType.SharedGroup && GetSgbPath((SharedGroupLayoutInstance*)inst) is { } sgb)
+            return sgb;
+        return inst->GetPrimaryPath().ToString() ?? string.Empty;
+    }
+
     // Returns the .sgb path stored on the SharedGroup's ResourceHandle, or null
     // if the handle / name isn't yet populated (zone-load is async — caller
     // retries each frame as MapController does for the barrier-drop helper).
