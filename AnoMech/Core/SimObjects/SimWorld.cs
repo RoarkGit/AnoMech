@@ -210,6 +210,7 @@ public sealed class SimWorld : ISimObject, IDisposable
         Markings.ClearAll();
         waymarks.ClearAll();
         Obstacles.Clear();
+        Map.ResetLayoutOverrides();
         ScenarioOrigin = default;
     }
 
