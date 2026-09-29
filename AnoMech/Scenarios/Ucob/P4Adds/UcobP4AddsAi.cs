@@ -65,36 +65,36 @@ public sealed class UcobP4AddsAi : IScenarioAi<UcobP4AddsState>
         ai.Move(13.2f, Uptime);
 
         ai.Move(21.2f, () => RangedBaitsLiquidHell(0));
-        ai.Move(24.44f, () => RangedBaitsLiquidHell(1), jitter: 0f);
-        ai.Move(25.59f, () => RangedBaitsLiquidHell(2), jitter: 0f);
-        ai.Move(26.75f, () => RangedBaitsLiquidHell(3), jitter: 0f);
-        ai.Move(27.95f, () => RangedBaitsLiquidHell(4), jitter: 0f);
-        ai.Move(29.13f, () => RangedBaitsLiquidHell(5), jitter: 0f);
+        ai.Move(23.99f, () => RangedBaitsLiquidHell(1), jitter: 0f);
+        ai.Move(25.14f, () => RangedBaitsLiquidHell(2), jitter: 0f);
+        ai.Move(26.30f, () => RangedBaitsLiquidHell(3), jitter: 0f);
+        ai.Move(27.50f, () => RangedBaitsLiquidHell(4), jitter: 0f);
+        ai.Move(28.68f, () => RangedBaitsLiquidHell(5), jitter: 0f);
         ai.Move(30.3f, () => HatchPositions(0), jitter: 0.2f);
         ai.Move(36.76f, () => SwapNeurolinksAroundTwisters(0, 0), jitter: 0f);
 
         ai.Move(41.45f, () => AnswerQuote(0, 0));
-        ai.Move(46.0f, () => AnswerQuote(0, 1));
-        ai.Move(49.1f, () => AnswerQuote(0, 2));
-        ai.Move(52.2f, Uptime);
+        ai.Move(45.7f, () => AnswerQuote(0, 1));
+        ai.Move(48.8f, () => AnswerQuote(0, 2));
+        ai.Move(51.9f, Uptime);
 
         ai.Move(53.91f, () => SidestepTwisters(1), jitter: 0f);
         ai.Move(58.7f, Uptime);
         ai.Move(75.7f, TanksTakeTheirAdds);
 
         ai.Move(83.9f, () => RangedBaitsLiquidHell(0));
-        ai.Move(87.08f, () => RangedBaitsLiquidHell(1), jitter: 0f);
-        ai.Move(88.24f, () => RangedBaitsLiquidHell(2), jitter: 0f);
-        ai.Move(89.40f, () => RangedBaitsLiquidHell(3), jitter: 0f);
-        ai.Move(90.55f, () => RangedBaitsLiquidHell(4), jitter: 0f);
-        ai.Move(91.71f, () => RangedBaitsLiquidHell(5), jitter: 0f);
+        ai.Move(86.63f, () => RangedBaitsLiquidHell(1), jitter: 0f);
+        ai.Move(87.79f, () => RangedBaitsLiquidHell(2), jitter: 0f);
+        ai.Move(88.95f, () => RangedBaitsLiquidHell(3), jitter: 0f);
+        ai.Move(90.10f, () => RangedBaitsLiquidHell(4), jitter: 0f);
+        ai.Move(91.26f, () => RangedBaitsLiquidHell(5), jitter: 0f);
         ai.Move(92.9f, () => HatchPositions(1), jitter: 0.2f);
         ai.Move(99.39f, () => SwapNeurolinksAroundTwisters(1, 2), jitter: 0f);
 
         ai.Move(104.05f, () => AnswerQuote(1, 0));
-        ai.Move(108.6f, () => AnswerQuote(1, 1));
-        ai.Move(111.7f, () => AnswerQuote(1, 2));
-        ai.Move(114.8f, Uptime);
+        ai.Move(108.3f, () => AnswerQuote(1, 1));
+        ai.Move(111.4f, () => AnswerQuote(1, 2));
+        ai.Move(114.5f, Uptime);
 
         ai.Move(116.53f, () => SidestepTwisters(3), jitter: 0f);
         ai.Move(121.3f, Uptime);
