@@ -91,10 +91,10 @@ public sealed partial class MultiplayerManager
             DiagnosticLog.Info($"[Multiplayer] Host: broadcasting SetFogHold {(value is { } v ? v.ToString("F0") : "off")}.");
             _ = relay.SendAsync(new SetFogHoldMessage(value));
         };
-        Plugin.GameInstance.World.Announced += text =>
+        Plugin.GameInstance.World.Announced += (text, speaker) =>
         {
             if (!IsHost || relay is not { IsConnected: true }) return;
-            _ = relay.SendAsync(new AnnouncementMessage(text));
+            _ = relay.SendAsync(new AnnouncementMessage(text, speaker));
         };
     }
 

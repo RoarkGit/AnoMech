@@ -126,6 +126,7 @@ public sealed partial class MultiplayerManager
         LeaveRequestMessage m => m.PeerId,
         PeerAppliedEnemyStatusMessage m => m.PeerId,
         PeerAppliedRoleStatusMessage m => m.PeerId,
+        PeerActionAttemptMessage m => m.PeerId,
         _ => null,
     };
 
@@ -245,6 +246,14 @@ public sealed partial class MultiplayerManager
                     enemy.AddStatus(applied.StatusId, duration);
                     DiagnosticLog.Info($"[Multiplayer] Host: applied {who}'s reported status {applied.StatusId} (duration={duration:F1}) to enemy NetId {netId}.");
                 }
+                break;
+            }
+            case PeerActionAttemptMessage attempt when IsHost:
+            {
+                if (Session.RoleOf(attempt.PeerId) is not { } role) break;
+                var enemy = hostEnemyNetIds.FirstOrDefault(kv => kv.Value == attempt.EnemyNetId).Key;
+                if (enemy == null) break;
+                Plugin.GameInstance.World.RaiseActionAttempted(role, attempt.ActionId, enemy);
                 break;
             }
             case PeerAppliedRoleStatusMessage applied when IsHost:
@@ -424,7 +433,8 @@ public sealed partial class MultiplayerManager
                 Plugin.GameInstance.World.Map.SetFogHold(fog.FogHold is { } hold ? NetGuard.Clamp(hold, 0f, 100_000f) : null);
                 break;
             case AnnouncementMessage announcement when PeerInRun:
-                Plugin.GameInstance.World.Announce(NetGuard.Clean(announcement.Text));
+                Plugin.GameInstance.World.Announce(NetGuard.Clean(announcement.Text),
+                    announcement.Speaker is { } speaker ? NetGuard.Clean(speaker) : null);
                 break;
             // Every IMultiplayerReplayable scenario routes through these two cases.
             case MpMessage genericMsg when !IsHost && genericMsg is IScenarioReplayStateMessage:

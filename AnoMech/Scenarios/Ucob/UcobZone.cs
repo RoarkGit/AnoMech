@@ -26,11 +26,9 @@ public sealed class UcobZone : IZone
     // state it picked (which varies with the inn the run started from), so each phase forces
     // its own. LGB layer 0x1360 (f1bz_Boss2: f1b4_t2_jari1 gravel ground clutter) is hidden in
     // every phase; it z-fights against whichever floor is meant to be visible.
-    public void Run(SimWorld world)
-    {
-        world.EnforceArenaBoundary(UcobConstants.Geometry.ArenaRadius);
-        world.Events.Add(1f, () => world.Map.SuppressLayer(0x1360));
-    }
+    public void Run(SimWorld world) => world.EnforceArenaBoundary(UcobConstants.Geometry.ArenaRadius);
+
+    public void RunClientSetup(SimWorld world) => world.Events.Add(1f, () => world.Map.SuppressLayer(0x1360));
 
     // bg.lgb splits the arena per phase: f1bz_Boss1 (+_light) is Twintania's rock-and-hand
     // platform, f1bz_Boss2 Nael's (hidden zone-wide above), and f1bz_Boss3 / f1bz_Boss3_2 the
