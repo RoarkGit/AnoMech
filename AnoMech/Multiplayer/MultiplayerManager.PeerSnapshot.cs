@@ -47,6 +47,20 @@ public sealed partial class MultiplayerManager
         _ = relay.SendAsync(new PeerAppliedEnemyStatusMessage(MyPeerId, netIds, statusId, duration));
     }
 
+    // True when forwarded, so the caller leaves the local world alone: the host decides.
+    public bool ReportActionAttempt(uint actionId, SimEnemy enemy)
+    {
+        if (IsHost || relay is not { IsConnected: true }) return false;
+        if (!PeerInRun) return true;
+        foreach (var (netId, replica) in peerEnemies)
+        {
+            if (replica != enemy) continue;
+            _ = relay.SendAsync(new PeerActionAttemptMessage(MyPeerId, actionId, netId));
+            break;
+        }
+        return true;
+    }
+
     public void ReportAppliedRoleStatus(IReadOnlyList<PartyRole> roles, ushort statusId, float duration)
     {
         if (IsHost || relay is not { IsConnected: true } || roles.Count == 0) return;

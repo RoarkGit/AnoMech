@@ -134,16 +134,46 @@ public sealed class SimWorld : ISimObject, IDisposable
 
     // A scenario message the whole party should see (which arrow was missed, why everyone just
     // died). Printed here and mirrored to peers, which have no other channel for mid-run text.
-    public event Action<string>? Announced;
+    public event Action<string, string?>? Announced;
 
-    public void Announce(string text)
+    // With a speaker, the line reads as that NPC's dialogue (a boss quote) instead of a
+    // system message.
+    public void Announce(string text, string? speaker = null)
     {
-        Plugin.ChatGui.Print(new XivChatEntry
-        {
-            Type = XivChatType.SystemMessage,
-            Message = new SeStringBuilder().AddText($"[AnoMech] {text}").Build(),
-        });
-        Announced?.Invoke(text);
+        Plugin.ChatGui.Print(speaker == null
+            ? new XivChatEntry
+            {
+                Type = XivChatType.SystemMessage,
+                Message = new SeStringBuilder().AddText($"[AnoMech] {text}").Build(),
+            }
+            : new XivChatEntry
+            {
+                Type = XivChatType.NPCDialogueAnnouncements,
+                Name = new SeStringBuilder().AddText(speaker).Build(),
+                Message = new SeStringBuilder().AddText(text).Build(),
+            });
+        Announced?.Invoke(text, speaker);
+    }
+
+    // A real action the local player or a seated peer aimed at a simulated enemy. The client
+    // refuses those, so the attempt is all a scenario can react to (a Provoke taking an add).
+    // Raised on the host only: a peer's attempts are forwarded to it.
+    public event Action<PartyRole, uint, SimEnemy>? ActionAttempted;
+    private int lastSeenActionAttempt;
+
+    internal void RaiseActionAttempted(PartyRole role, uint actionId, SimEnemy enemy)
+        => ActionAttempted?.Invoke(role, actionId, enemy);
+
+    private void PollLocalActionAttempt()
+    {
+        var hooks = Plugin.PlayerInputHooks;
+        if (hooks.ActionAttemptSequence == lastSeenActionAttempt) return;
+        lastSeenActionAttempt = hooks.ActionAttemptSequence;
+        var target = (uint)hooks.LastAttemptedActionTarget;
+        if (children.OfType<SimEnemy>().FirstOrDefault(e => e.IsActive && e.GameObjectId.ObjectId == target) is not { } enemy)
+            return;
+        if (Plugin.MultiplayerInstance?.ReportActionAttempt(hooks.LastAttemptedActionId, enemy) == true) return;
+        RaiseActionAttempted(Party.PlayerRole, hooks.LastAttemptedActionId, enemy);
     }
 
     // Spawns a standalone AOE telegraph (omen StaticVfx) that auto-expires after
@@ -194,6 +224,7 @@ public sealed class SimWorld : ISimObject, IDisposable
     public void Tick(float deltaSeconds)
     {
         Map.Tick();
+        PollLocalActionAttempt();
         AnoMech.Core.Native.VfxSpawnLog.Tick();
         AnoMech.Helpers.CharacterManagerHelper.SweepOrphans();
         children.Update(deltaSeconds);

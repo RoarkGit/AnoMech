@@ -8,8 +8,6 @@ using AnoMech.Core.Game.Ai;
 using AnoMech.Core.Game.Geometry;
 using AnoMech.Core.Game.Party;
 using AnoMech.Core.SimObjects;
-using Dalamud.Game.Text;
-using Dalamud.Game.Text.SeStringHandling;
 using static AnoMech.Scenarios.Ucob.P4Adds.UcobP4AddsConstants;
 using BNpcBaseId = AnoMech.Scenarios.Ucob.UcobConstants.BNpcBaseId;
 using BNpcNameId = AnoMech.Scenarios.Ucob.UcobConstants.BNpcNameId;
@@ -23,13 +21,14 @@ namespace AnoMech.Scenarios.Ucob.P4Adds;
 // second Megaflare, which slower kills see.
 //
 // Tank flow: each tank keeps one add, the buster pair splits across them, and both adds swap
-// tanks right after it. With two bot tanks the swaps are scripted; with a player tank they
-// follow the player's Provoke.
+// tanks right after it. With two bot tanks the swaps are scripted; with a human tank (the
+// player or a multiplayer peer) they follow that tank's Provoke.
 public sealed class UcobP4AddsScenario : IScenario
 {
     public string Name => "Adds";
     public IPhase Phase => UcobZone.P4;
     public bool SupportsSolo => true;
+    public bool SupportsMultiplayer => true;
 
     public IReadOnlyList<IScenarioAi> AiStrats => [new UcobP4AddsAi()];
 
@@ -78,7 +77,6 @@ public sealed class UcobP4AddsScenario : IScenario
     private readonly List<Twister> twisters = new();
     private readonly List<(Vector3 Center, float ArmAt, float ExpireAt)> puddles = new();
     private readonly List<(SimCharacter Member, float DiesAt)> burning = new();
-    private int lastSeenActionAttempt;
     private bool engaged;
     private bool bossesHeld;
     private float clock;
@@ -96,7 +94,8 @@ public sealed class UcobP4AddsScenario : IScenario
         twisters.Clear();
         puddles.Clear();
         burning.Clear();
-        lastSeenActionAttempt = Plugin.PlayerInputHooks.ActionAttemptSequence;
+        world.ActionAttempted -= OnActionAttempted;
+        world.ActionAttempted += OnActionAttempted;
         engaged = false;
         bossesHeld = false;
         clock = 0f;
@@ -109,8 +108,6 @@ public sealed class UcobP4AddsScenario : IScenario
         world.Events.Add(0.5f, SpawnNeurolinks);
         world.Events.Add(0.5f, SpawnBahamut);
         world.Events.Add(1.0f, () => WarpIn(bahamut, ActionTimelineId.WarpEnd));
-        world.Events.Add(1.0f, () => PlayTeraflareWall(steadyOn: false));
-        world.Events.Add(6.2f, () => PlayTeraflareWall(steadyOn: true));
         world.Events.Add(2.49f, () => bahamut?.SetModelState(BahamutChargingModelState));
         world.Events.Add(2.56f, () => bahamut?.PlayActionTimeline(ActionTimelineId.BahamutDivineJudgmentPose));
         world.Events.Add(4.5f, SpawnTwintaniaAndNael);
@@ -192,7 +189,6 @@ public sealed class UcobP4AddsScenario : IScenario
     public void Tick(float delta, float elapsed)
     {
         clock = elapsed;
-        ListenForPlayerProvoke();
         SwingAutoAttacks(delta);
         BurnPuddleStandersInLiquidHell();
         UpdateNeurolinkStatus();
@@ -200,8 +196,15 @@ public sealed class UcobP4AddsScenario : IScenario
         UpdateTwisters();
     }
 
-    private void PlayTeraflareWall(bool steadyOn) =>
-        world.Map.PlaySharedGroupTimeline(TeraflareWall.Sgb,
+    // A peer never runs Run, and the wall is fixed-time scenery.
+    public void RunInstanceEvents(SimWorld instanceWorld)
+    {
+        instanceWorld.Events.Add(1.0f, () => PlayTeraflareWall(instanceWorld, steadyOn: false));
+        instanceWorld.Events.Add(6.2f, () => PlayTeraflareWall(instanceWorld, steadyOn: true));
+    }
+
+    private static void PlayTeraflareWall(SimWorld instanceWorld, bool steadyOn) =>
+        instanceWorld.Map.PlaySharedGroupTimeline(TeraflareWall.Sgb,
             steadyOn ? TeraflareWall.On : TeraflareWall.OffToOn, resetIndex: TeraflareWall.Off);
 
     private void SpawnNeurolinks()
@@ -289,37 +292,33 @@ public sealed class UcobP4AddsScenario : IScenario
 
     private void BotTanksGiveNaelTo(PartyRole role)
     {
-        if (!party.PlayerRole.IsTank()) GiveNaelTo(role);
+        if (!AnyHumanTank) GiveNaelTo(role);
     }
 
     private void BotTanksGiveTwintaniaTo(PartyRole role)
     {
-        if (!party.PlayerRole.IsTank()) GiveTwintaniaTo(role);
+        if (!AnyHumanTank) GiveTwintaniaTo(role);
     }
 
-    // With the player tanking, swaps follow their Provoke instead of the script: the add they
-    // provoke comes to them and the other add goes to the other tank. The game refuses the real
-    // Provoke on a simulated enemy, so the input hook's recorded attempt is what's read.
-    private void ListenForPlayerProvoke()
+    private bool AnyHumanTank => IsHuman(PartyRole.MainTank) || IsHuman(PartyRole.OffTank);
+
+    private bool IsHuman(PartyRole role) => role == party.PlayerRole || party.Get(role) is SimNetworkPuppet;
+
+    // With a human tank, swaps follow Provoke instead of the script: the add they provoke comes
+    // to them and the other add goes to the other tank.
+    private void OnActionAttempted(PartyRole role, uint actionId, SimEnemy enemy)
     {
-        var hooks = Plugin.PlayerInputHooks;
-        if (hooks.ActionAttemptSequence == lastSeenActionAttempt) return;
-        lastSeenActionAttempt = hooks.ActionAttemptSequence;
-        if (!engaged || hooks.LastAttemptedActionId != ActionId.Provoke) return;
+        if (!engaged || actionId != ActionId.Provoke || !role.IsTank()) return;
+        var coTank = role == PartyRole.MainTank ? PartyRole.OffTank : PartyRole.MainTank;
 
-        var player = party.PlayerRole;
-        if (!player.IsTank()) return;
-        var coTank = player == PartyRole.MainTank ? PartyRole.OffTank : PartyRole.MainTank;
-        var target = (uint)hooks.LastAttemptedActionTarget;
-
-        if (state.Nael is { } nael && nael.GameObjectId.ObjectId == target && state.NaelTank != player)
+        if (enemy == state.Nael && state.NaelTank != role)
         {
-            GiveNaelTo(player);
+            GiveNaelTo(role);
             GiveTwintaniaTo(coTank);
         }
-        else if (state.Twintania is { } twin && twin.GameObjectId.ObjectId == target && state.TwintaniaTank != player)
+        else if (enemy == state.Twintania && state.TwintaniaTank != role)
         {
-            GiveTwintaniaTo(player);
+            GiveTwintaniaTo(role);
             GiveNaelTo(coTank);
         }
     }
@@ -349,24 +348,12 @@ public sealed class UcobP4AddsScenario : IScenario
 
     private void AnnounceSwap(PartyRole role, string boss)
     {
-        if (!party.PlayerRole.IsTank()) return;
-        var who = role == party.PlayerRole ? "you" : role == PartyRole.MainTank ? "the main tank" : "the off tank";
-        Plugin.ChatGui.Print(new XivChatEntry
-        {
-            Type = XivChatType.SystemMessage,
-            Message = new SeStringBuilder().AddText($"[AnoMech] Tank swap: {boss} is now on {who}.").Build(),
-        });
+        if (!AnyHumanTank) return;
+        var who = role == PartyRole.MainTank ? "the main tank" : "the off tank";
+        world.Announce($"Tank swap: {boss} is now on {who}.");
     }
 
-    private static void NaelSays(string text)
-    {
-        Plugin.ChatGui.Print(new XivChatEntry
-        {
-            Type = XivChatType.NPCDialogueAnnouncements,
-            Name = new SeStringBuilder().AddText(UcobP4AddsConstants.Text.NaelName).Build(),
-            Message = new SeStringBuilder().AddText(text).Build(),
-        });
-    }
+    private void NaelSays(string text) => world.Announce(text, UcobP4AddsConstants.Text.NaelName);
 
     private void SwingAutoAttacks(float delta)
     {

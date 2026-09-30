@@ -64,6 +64,7 @@ namespace AnoMech.Multiplayer;
 [JsonDerivedType(typeof(TopP5OmegaHelloWorld2UpdateMessage), "topP5OmegaHelloWorld2Update")]
 [JsonDerivedType(typeof(PeerAppliedEnemyStatusMessage), "peerAppliedEnemyStatus")]
 [JsonDerivedType(typeof(PeerAppliedRoleStatusMessage), "peerAppliedRoleStatus")]
+[JsonDerivedType(typeof(PeerActionAttemptMessage), "peerActionAttempt")]
 [JsonDerivedType(typeof(KickMessage), "kick")]
 public abstract record MpMessage;
 
@@ -286,7 +287,7 @@ public sealed record SetWeatherMessage(byte WeatherId, float Transition) : MpMes
 public sealed record SetFogHoldMessage(float? FogHold) : MpMessage, IHostOnlyMessage;
 
 // Replay of SimWorld.Announce: a scenario's own mid-run message to the party.
-public sealed record AnnouncementMessage(string Text) : MpMessage, IHostOnlyMessage;
+public sealed record AnnouncementMessage(string Text, string? Speaker = null) : MpMessage, IHostOnlyMessage;
 
 // The subset UmadP4KefkaSaysAi reads (UmadP4KefkaSaysState.FromNetworkReplay); MysteryCast
 // reduced to its three scalars.
@@ -392,3 +393,6 @@ public sealed record PeerAppliedEnemyStatusMessage(Guid PeerId, List<int> EnemyN
 // Party counterpart, the peer's own role included: a peer's presses land only on its own
 // client, and the host decides who lives from the statuses on its own copies.
 public sealed record PeerAppliedRoleStatusMessage(Guid PeerId, List<PartyRole> Roles, ushort StatusId, float Duration) : MpMessage;
+
+// Peer -> host: a real action the peer aimed at a replicated enemy (see SimWorld.ActionAttempted).
+public sealed record PeerActionAttemptMessage(Guid PeerId, uint ActionId, int EnemyNetId) : MpMessage;

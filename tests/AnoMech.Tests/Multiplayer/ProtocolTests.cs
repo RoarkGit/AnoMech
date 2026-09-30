@@ -11,7 +11,8 @@ public class ProtocolTests
 {
     // The peer types a relay passes from peers to the host; the rest are the host's alone.
     private static readonly string[] PeerTypes = ["hello", "claim", "release", "pose", "pong", "startCheckResponse", "startAbort", "sessionEnded",
-        "resetRequest", "leaveRequest", "peerAppliedEnemyStatus", "peerAppliedRoleStatus"];
+        "resetRequest", "leaveRequest", "peerAppliedEnemyStatus", "peerAppliedRoleStatus",
+        "peerActionAttempt"];
 
     // Host messages are only typed by RelayWire; the rest falls to deserialization.
     [Test]
