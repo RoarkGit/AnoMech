@@ -35,7 +35,8 @@ public sealed class UcobP4AddsAi : IScenarioAi<UcobP4AddsState>
     private const float ChariotClearance = 2.5f;
     private const float SafeArenaReach = 18.5f;
     private const float LooseStackRadius = 3f;
-    private const float TightDiveSpreadRadius = 4.5f;
+    private const float TightDiveSpreadRadius = 5f;
+    private const float QuoteJitter = 0.1f;
     private const float TwisterClearance = Geometry.TwisterTriggerRadius + 1.3f;
     private const float NeurolinkExitDistance = 4.8f;
 
@@ -74,8 +75,8 @@ public sealed class UcobP4AddsAi : IScenarioAi<UcobP4AddsState>
         ai.Move(36.76f, () => SwapNeurolinksAroundTwisters(0, 0), jitter: 0f);
 
         ai.Move(41.45f, () => AnswerQuote(0, 0));
-        ai.Move(45.7f, () => AnswerQuote(0, 1));
-        ai.Move(48.8f, () => AnswerQuote(0, 2));
+        ai.Move(45.45f, () => AnswerQuote(0, 1), jitter: QuoteJitter, sprint: true);
+        ai.Move(48.55f, () => AnswerQuote(0, 2), jitter: QuoteJitter, sprint: true);
         ai.Move(51.9f, Uptime);
 
         ai.Move(53.91f, () => SidestepTwisters(1), jitter: 0f);
@@ -92,8 +93,8 @@ public sealed class UcobP4AddsAi : IScenarioAi<UcobP4AddsState>
         ai.Move(99.39f, () => SwapNeurolinksAroundTwisters(1, 2), jitter: 0f);
 
         ai.Move(104.05f, () => AnswerQuote(1, 0));
-        ai.Move(108.3f, () => AnswerQuote(1, 1));
-        ai.Move(111.4f, () => AnswerQuote(1, 2));
+        ai.Move(108.03f, () => AnswerQuote(1, 1), jitter: QuoteJitter, sprint: true);
+        ai.Move(111.13f, () => AnswerQuote(1, 2), jitter: QuoteJitter, sprint: true);
         ai.Move(114.5f, Uptime);
 
         ai.Move(116.53f, () => SidestepTwisters(3), jitter: 0f);
