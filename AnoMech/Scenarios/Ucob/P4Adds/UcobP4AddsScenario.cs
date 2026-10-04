@@ -42,7 +42,7 @@ public sealed class UcobP4AddsScenario : IScenario
     private const float TwisterLifetime = 5.7f;
     private const float LiquidHellPuddleLifetime = 11.7f;
     // UNVERIFIED: Burns starts landing 0.8-2s after a puddle spawns.
-    private const float LiquidHellPuddleArmDelay = 0.8f;
+    private const float LiquidHellPuddleArmDelay = 2f;
     private const float BurnsDeathDelay = 3f;
     private const float TwisterBurstLinger = 1.5f;
     private const float OrbLingerAfterPop = 1.5f;
@@ -425,7 +425,7 @@ public sealed class UcobP4AddsScenario : IScenario
         for (var i = burning.Count - 1; i >= 0; i--)
         {
             if (clock < burning[i].DiesAt) continue;
-            burning[i].Member.Die("Burns from a Liquid Hell puddle. Puddles turn deadly 0.8s after they drop, so keep moving away from them.");
+            burning[i].Member.Die($"Burns from a Liquid Hell puddle. Puddles turn deadly {LiquidHellPuddleArmDelay:0.#}s after they drop, so keep moving away from them.");
             burning.RemoveAt(i);
         }
     }
