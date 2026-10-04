@@ -297,9 +297,20 @@ public sealed class UcobP4AddsAi : IScenarioAi<UcobP4AddsState>
     private IAiMove Go(Vector2?[] spots)
     {
         for (var slot = 0; slot < spots.Length; slot++)
+        {
             if (spots[slot] is { } spot)
                 spots[slot] = ClearOfLiveTwisters(spot);
+            else if (StandingByLiveTwister(slot) is { } here)
+                spots[slot] = ClearOfLiveTwisters(here);
+        }
         return AiMove.Create(spots).NaturalOrder();
+    }
+
+    private Vector2? StandingByLiveTwister(int slot)
+    {
+        if (world.Party.Get(slot) is not { } member || !member.IsAlive()) return null;
+        var here = Flat(member.Position);
+        return state.LiveTwisters.Any(t => Vector2.Distance(Flat(t), here) < TwisterClearance) ? here : null;
     }
 
     private Vector2 ClearOfLiveTwisters(Vector2 spot)
