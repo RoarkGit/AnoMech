@@ -3,7 +3,7 @@
     "Author": "Anomek",
     "Name": "AnoMech (Preview)",
     "InternalName": "AnoMech",
-    "AssemblyVersion": "0.4.2.3",
+    "AssemblyVersion": "0.4.2.4",
     "Description": "Spawns fake party members and bosses client-side so you can practice raid mechanics without a full party. This preview build tracks the official AnoMech release and adds the UCOB P4 Adds scenario (Twintania and Nael deus Darnus: Hatch into the Neurolinks, Twisters, Nael's quotes, Liquid Hell, and tank swaps that follow your Provoke) plus corrected UCOB arena layouts, playable solo or in multiplayer, ahead of them merging upstream. Switch back to the official repo once they land.",
     "ApplicableVersion": "any",
     "RepoUrl": "https://github.com/RoarkGit/AnoMech",
