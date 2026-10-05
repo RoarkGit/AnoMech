@@ -384,8 +384,8 @@ public sealed class UcobP4AddsScenario : IScenario
             twin.Cast(ActionId.Plummet, castSeconds: 0f, targetId: twinTank.GameObjectId);
             var cleave = new Placement(twin.Position, 0f).Face(twinTank.Position);
             foreach (var hit in party.Find.InsideCone(cleave, Geometry.PlummetHalfAngle, Geometry.PlummetLength).ToList())
-                if (hit is not ISimPartyMember { Role: PartyRole.MainTank or PartyRole.OffTank })
-                    hit.Die("Hit by Plummet, Twintania's frontal cleave on her tank. Stay out from in front of Twintania.");
+                if (hit != twinTank)
+                    hit.Die("Hit by Plummet, Twintania's frontal cleave on her tank. Only her tank should be in front of Twintania.");
         }
 
         if (party.Get(state.NaelTank) is { } naelTank && naelTank.IsAlive())

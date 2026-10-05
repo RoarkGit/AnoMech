@@ -20,8 +20,13 @@ public sealed class UcobP4AddsAi : IScenarioAi<UcobP4AddsState>
     private const float DynamoHuddleArc = 2.44f;
     private const float DiveSpreadRadius = 6.5f;
 
-    private static readonly Vector2 NaelTankSpot = new(12.4f, -7.8f);
-    private static readonly Vector2 TwintaniaTankSpot = new(14.6f, -6.6f);
+    private const float TankHitboxRadius = 0.5f;
+    private static readonly Vector2 AddsStackSpot = new(13.2f, -7.1f);
+    private static readonly Vector2 AlongWallFromAdds = Vector2.Normalize(new Vector2(-AddsStackSpot.Y, AddsStackSpot.X));
+    private static readonly Vector2 TwintaniaTankSpot =
+        AddsStackSpot + AlongWallFromAdds * (Geometry.TwintaniaHitboxRadius + TankHitboxRadius);
+    private static readonly Vector2 NaelTankSpot =
+        AddsStackSpot - AlongWallFromAdds * (Geometry.NaelHitboxRadius + TankHitboxRadius);
     private static readonly Vector2 PartyStack = Flat(UcobConstants.AetherWaymarks.First(w => w.Slot == WaymarkSlot.Four).Offset);
     private static readonly Vector2 DiveSpreadCenter = new(3f, -2f);
     private static readonly Vector2 NorthHealerSpot = new(2f, -17f);
