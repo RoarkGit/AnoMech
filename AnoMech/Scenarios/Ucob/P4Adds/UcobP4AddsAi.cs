@@ -25,8 +25,11 @@ public sealed class UcobP4AddsAi : IScenarioAi<UcobP4AddsState>
     private static readonly Vector2 AlongWallFromAdds = Vector2.Normalize(new Vector2(-AddsStackSpot.Y, AddsStackSpot.X));
     private static readonly Vector2 TwintaniaTankSpot =
         AddsStackSpot + AlongWallFromAdds * (Geometry.TwintaniaHitboxRadius + TankHitboxRadius);
-    private static readonly Vector2 NaelTankSpot =
+    private static readonly Vector2 NaelTankPlummetSpot =
         AddsStackSpot - AlongWallFromAdds * (Geometry.NaelHitboxRadius + TankHitboxRadius);
+    private const float TankPairGap = 1f;
+    private static readonly Vector2 NaelTankSpot =
+        TwintaniaTankSpot - Vector2.Normalize(AddsStackSpot) * TankPairGap;
     private static readonly Vector2 PartyStack = Flat(UcobConstants.AetherWaymarks.First(w => w.Slot == WaymarkSlot.Four).Offset);
     private static readonly Vector2 DiveSpreadCenter = new(3f, -2f);
     private static readonly Vector2 NorthHealerSpot = new(2f, -17f);
@@ -68,9 +71,10 @@ public sealed class UcobP4AddsAi : IScenarioAi<UcobP4AddsState>
         var ai = new AiManager(world);
 
         ai.Move(0.5f, TanksMeetAddsAtSpawn);
-        ai.Move(13.2f, Uptime);
+        ai.Move(13.2f, UptimeWithNaelTankOutOfPlummet);
 
         ai.Move(21.2f, () => RangedBaitsLiquidHell(0));
+        ai.Move(21.4f, TanksTakeTheirAdds);
         ai.Move(23.99f, () => RangedBaitsLiquidHell(1), jitter: 0f);
         ai.Move(25.14f, () => RangedBaitsLiquidHell(2), jitter: 0f);
         ai.Move(26.30f, () => RangedBaitsLiquidHell(3), jitter: 0f);
@@ -86,7 +90,8 @@ public sealed class UcobP4AddsAi : IScenarioAi<UcobP4AddsState>
 
         ai.Move(53.91f, () => SidestepTwisters(1), jitter: 0f);
         ai.Move(58.7f, Uptime);
-        ai.Move(75.7f, TanksTakeTheirAdds);
+        ai.Move(75.7f, TanksTakeTheirAddsWithNaelTankOutOfPlummet);
+        ai.Move(78.1f, TanksTakeTheirAdds);
 
         ai.Move(83.9f, () => RangedBaitsLiquidHell(0));
         ai.Move(86.63f, () => RangedBaitsLiquidHell(1), jitter: 0f);
@@ -123,6 +128,22 @@ public sealed class UcobP4AddsAi : IScenarioAi<UcobP4AddsState>
         return Go(spots);
     }
 
+    private IAiMove UptimeWithNaelTankOutOfPlummet()
+    {
+        var spots = UptimeSpots.Select(s => (Vector2?)s).ToArray();
+        spots[(int)PartyRole.MainTank] = TankSpotOutOfPlummet(PartyRole.MainTank);
+        spots[(int)PartyRole.OffTank] = TankSpotOutOfPlummet(PartyRole.OffTank);
+        return Go(spots);
+    }
+
+    private IAiMove TanksTakeTheirAddsWithNaelTankOutOfPlummet()
+    {
+        var spots = new Vector2?[Slots];
+        spots[(int)PartyRole.MainTank] = TankSpotOutOfPlummet(PartyRole.MainTank);
+        spots[(int)PartyRole.OffTank] = TankSpotOutOfPlummet(PartyRole.OffTank);
+        return Go(spots);
+    }
+
     private IAiMove TanksTakeTheirAdds()
     {
         var spots = new Vector2?[Slots];
@@ -133,6 +154,9 @@ public sealed class UcobP4AddsAi : IScenarioAi<UcobP4AddsState>
 
     private Vector2 TankSpot(PartyRole tank) =>
         state.NaelTank == tank ? NaelTankSpot : TwintaniaTankSpot;
+
+    private Vector2 TankSpotOutOfPlummet(PartyRole tank) =>
+        state.NaelTank == tank ? NaelTankPlummetSpot : TwintaniaTankSpot;
 
     private IAiMove RangedBaitsLiquidHell(int drop)
     {
