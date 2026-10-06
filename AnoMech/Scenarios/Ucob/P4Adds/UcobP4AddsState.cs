@@ -98,8 +98,17 @@ public sealed class UcobP4AddsState
 
     public SimEnemy? Twintania { get; set; }
     public SimEnemy? Nael { get; set; }
-    public PartyRole TwintaniaTank { get; set; } = PartyRole.MainTank;
-    public PartyRole NaelTank { get; set; } = PartyRole.OffTank;
+    public PartyRole TwintaniaTank { get; private set; } = PartyRole.MainTank;
+    public PartyRole NaelTank { get; private set; } = PartyRole.OffTank;
+    public event System.Action? TankAssignmentsChanged;
+
+    public void AssignTanks(PartyRole twintaniaTank, PartyRole naelTank)
+    {
+        if (twintaniaTank == TwintaniaTank && naelTank == NaelTank) return;
+        TwintaniaTank = twintaniaTank;
+        NaelTank = naelTank;
+        TankAssignmentsChanged?.Invoke();
+    }
     public SimCharacter? LiquidHellTarget { get; set; }
     public List<System.Numerics.Vector3> LiveTwisters { get; } = new();
     public List<(PartyRole Role, System.Numerics.Vector3 Position)>[] TwisterSnapshots { get; } =
