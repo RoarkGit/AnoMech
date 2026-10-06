@@ -61,6 +61,8 @@ public sealed class UcobP4AddsAi : IScenarioAi<UcobP4AddsState>
     ];
 
 
+    private static readonly (float From, float Until)[] NaelTankDodgesPlummetWindows = [(0f, 21.14f), (69.7f, 77.84f)];
+
     private UcobP4AddsState state = null!;
     private SimWorld world = null!;
 
@@ -69,6 +71,7 @@ public sealed class UcobP4AddsAi : IScenarioAi<UcobP4AddsState>
         state = stateParam;
         world = worldParam;
         var ai = new AiManager(world);
+        state.TankAssignmentsChanged += () => ai.Move(0f, TanksFollowTheSwap, jitter: 0f, sprint: true);
 
         ai.Move(0.5f, TanksMeetAddsAtSpawn);
         ai.Move(13.2f, UptimeWithNaelTankOutOfPlummet);
@@ -90,7 +93,6 @@ public sealed class UcobP4AddsAi : IScenarioAi<UcobP4AddsState>
 
         ai.Move(53.91f, () => SidestepTwisters(1), jitter: 0f);
         ai.Move(58.7f, Uptime);
-        ai.Move(75.7f, TanksTakeTheirAddsWithNaelTankOutOfPlummet);
         ai.Move(78.1f, TanksTakeTheirAdds);
 
         ai.Move(83.9f, () => RangedBaitsLiquidHell(0));
@@ -109,7 +111,6 @@ public sealed class UcobP4AddsAi : IScenarioAi<UcobP4AddsState>
 
         ai.Move(116.53f, () => SidestepTwisters(3), jitter: 0f);
         ai.Move(121.3f, Uptime);
-        ai.Move(131.0f, TanksTakeTheirAdds);
     }
 
     private IAiMove TanksMeetAddsAtSpawn()
@@ -134,6 +135,15 @@ public sealed class UcobP4AddsAi : IScenarioAi<UcobP4AddsState>
         spots[(int)PartyRole.MainTank] = TankSpotOutOfPlummet(PartyRole.MainTank);
         spots[(int)PartyRole.OffTank] = TankSpotOutOfPlummet(PartyRole.OffTank);
         return Go(spots);
+    }
+
+    private IAiMove TanksFollowTheSwap() =>
+        NaelTankDodgesPlummet() ? TanksTakeTheirAddsWithNaelTankOutOfPlummet() : TanksTakeTheirAdds();
+
+    private bool NaelTankDodgesPlummet()
+    {
+        var now = world.Events.Elapsed;
+        return NaelTankDodgesPlummetWindows.Any(w => now >= w.From && now < w.Until);
     }
 
     private IAiMove TanksTakeTheirAddsWithNaelTankOutOfPlummet()

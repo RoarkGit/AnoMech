@@ -276,17 +276,15 @@ public sealed class UcobP4AddsScenario : IScenario
         FollowHolders();
     }
 
-    private void GiveNaelTo(PartyRole role)
-    {
-        state.NaelTank = role;
-        AnnounceSwap(role, UcobP4AddsConstants.Text.NaelName);
-        if (!bossesHeld) FollowHolders();
-    }
+    private void GiveNaelTo(PartyRole role) => AssignTanks(state.TwintaniaTank, role);
 
-    private void GiveTwintaniaTo(PartyRole role)
+    private void GiveTwintaniaTo(PartyRole role) => AssignTanks(role, state.NaelTank);
+
+    private void AssignTanks(PartyRole twintaniaTank, PartyRole naelTank)
     {
-        state.TwintaniaTank = role;
-        AnnounceSwap(role, "Twintania");
+        if (twintaniaTank != state.TwintaniaTank) AnnounceSwap(twintaniaTank, "Twintania");
+        if (naelTank != state.NaelTank) AnnounceSwap(naelTank, UcobP4AddsConstants.Text.NaelName);
+        state.AssignTanks(twintaniaTank, naelTank);
         if (!bossesHeld) FollowHolders();
     }
 
@@ -312,15 +310,9 @@ public sealed class UcobP4AddsScenario : IScenario
         var coTank = role == PartyRole.MainTank ? PartyRole.OffTank : PartyRole.MainTank;
 
         if (enemy == state.Nael && state.NaelTank != role)
-        {
-            GiveNaelTo(role);
-            GiveTwintaniaTo(coTank);
-        }
+            AssignTanks(coTank, role);
         else if (enemy == state.Twintania && state.TwintaniaTank != role)
-        {
-            GiveTwintaniaTo(role);
-            GiveNaelTo(coTank);
-        }
+            AssignTanks(role, coTank);
     }
 
     private void FollowHolders()
