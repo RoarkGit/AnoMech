@@ -84,6 +84,10 @@ public sealed class UcobP5ExaflaresScenario : IMultiplayerReplayable
         timeline.Add(state.LastHitAt + DespawnAfterLastHit, DespawnAll);
     }
 
+    // The mechanic lives on `timeline`, not world.Events, so the default check would read
+    // finished from the first second and auto-restart would loop.
+    public bool IsFinished(SimWorld world) => timeline.IsEmpty;
+
     public void Tick(float delta, float elapsed)
     {
         // Advance the timeline by real wall time, capping pause/hitch gaps so a freeze can't
