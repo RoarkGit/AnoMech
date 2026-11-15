@@ -2,37 +2,43 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
-using AnoMech.Core;
+using AnoMech.Core.EnemyActions;
 using AnoMech.Core.Game;
 using AnoMech.Core.Game.Ai;
 using AnoMech.Core.Game.Geometry;
 using AnoMech.Core.Game.Party;
 using AnoMech.Core.SimObjects;
 using static AnoMech.Scenarios.Ucob.P4Adds.UcobP4AddsConstants;
+using Actions = AnoMech.Scenarios.Ucob.UcobActions;
+using ActionId = AnoMech.Scenarios.Ucob.UcobConstants.ActionId;
+using ActionTimelineId = AnoMech.Scenarios.Ucob.UcobConstants.ActionTimelineId;
 using BNpcBaseId = AnoMech.Scenarios.Ucob.UcobConstants.BNpcBaseId;
 using BNpcNameId = AnoMech.Scenarios.Ucob.UcobConstants.BNpcNameId;
+using EObjId = AnoMech.Scenarios.Ucob.UcobConstants.EObjId;
+using LockonId = AnoMech.Scenarios.Ucob.UcobConstants.LockonId;
+using StatusId = AnoMech.Scenarios.Ucob.UcobConstants.StatusId;
+using TetherId = AnoMech.Scenarios.Ucob.UcobConstants.TetherId;
 
 namespace AnoMech.Scenarios.Ucob.P4Adds;
 
 // UCOB P4 "adds": Twintania and Nael deus Darnus guard a charging Bahamut Prime. Covers the
 // first ~135s of the phase (two Hatch sets, four Twisters, two Nael triple quotes, both
-// tankbuster pairs, Megaflares and Liquid Hells). Nael's "O Bahamut! We shall stand guard..."
-// lands at 8s. The adds die on HP somewhere past two minutes in, so the scenario runs to the
-// second Megaflare, which slower kills see.
+// tankbuster pairs, Megaflares and Liquid Hells). The adds die on HP somewhere past two minutes
+// in, so the scenario runs to the second Megaflare, which slower kills see.
 //
 // Tank flow: each tank keeps one add, the buster pair splits across them, and both adds swap
-// tanks right after it. With two bot tanks the swaps are scripted; with a human tank (the
-// player or a multiplayer peer) they follow that tank's Provoke.
+// tanks right after it. With two bot tanks the swaps are scripted; with a human tank they
+// follow that tank's Provoke.
 public sealed class UcobP4AddsScenario : IScenario
 {
     public string Name => "Adds";
     public IPhase Phase => UcobZone.P4;
     public bool SupportsSolo => true;
-    public bool SupportsMultiplayer => true;
 
     public IReadOnlyList<IScenarioAi> AiStrats => [new UcobP4AddsAi()];
 
     public void DrawSettings() => settingsWindow.Draw();
+    public object SettingsOverrides => settingsWindow.Overrides;
     private readonly UcobP4AddsSettingsWindow settingsWindow = new();
 
     private const float AutoAttackInterval = 3.05f;
@@ -44,10 +50,10 @@ public sealed class UcobP4AddsScenario : IScenario
     // UNVERIFIED: Burns starts landing 0.8-2s after a puddle spawns.
     private const float LiquidHellPuddleArmDelay = 2f;
     private const float BurnsDeathDelay = 3f;
+    private const float BurnsDuration = 15f;
     private const float TwisterBurstLinger = 1.5f;
     private const float OrbLingerAfterPop = 1.5f;
-    // UNVERIFIED: a clear survived the beam with 6 of 8 in it; fewer is assumed lethal.
-    private const int MinThermionicBeamStack = 6;
+    private const int ThermionicBeamStack = 6;
 
     private sealed class HatchOrb(SimEnemy orb, SimCharacter target)
     {
@@ -57,9 +63,9 @@ public sealed class UcobP4AddsScenario : IScenario
         public float? DespawnAt { get; set; }
     }
 
-    private sealed class Twister(SimEnemy helper, SimEventObject? visual, CircleObstacle keepOut, float armAt, float expireAt)
+    private sealed class Twister(Vector3 position, SimEventObject? visual, CircleObstacle keepOut, float armAt, float expireAt)
     {
-        public SimEnemy Helper { get; } = helper;
+        public Vector3 Position { get; } = position;
         public SimEventObject? Visual { get; } = visual;
         public CircleObstacle KeepOut { get; } = keepOut;
         public float ArmAt { get; } = armAt;
@@ -69,10 +75,10 @@ public sealed class UcobP4AddsScenario : IScenario
 
     private SimWorld world = null!;
     private SimParty party = null!;
-    private DamageSolver damage = null!;
     private UcobP4AddsState state = null!;
 
     private SimEnemy? bahamut;
+    private SimCharacter? liquidHellTarget;
     private readonly List<HatchOrb> orbs = new();
     private readonly List<Twister> twisters = new();
     private readonly List<(Vector3 Center, float ArmAt, float ExpireAt)> puddles = new();
@@ -87,15 +93,13 @@ public sealed class UcobP4AddsScenario : IScenario
     {
         world = worldParam;
         party = world.Party;
-        damage = new DamageSolver(party);
-        state = new UcobP4AddsState(settingsWindow.Overrides);
+        state = new UcobP4AddsState(world.Rng, party, settingsWindow.Overrides);
         bahamut = null;
+        liquidHellTarget = null;
         orbs.Clear();
         twisters.Clear();
         puddles.Clear();
         burning.Clear();
-        world.ActionAttempted -= OnActionAttempted;
-        world.ActionAttempted += OnActionAttempted;
         engaged = false;
         bossesHeld = false;
         clock = 0f;
@@ -107,12 +111,12 @@ public sealed class UcobP4AddsScenario : IScenario
 
         world.Events.Add(0.5f, SpawnNeurolinks);
         world.Events.Add(0.5f, SpawnBahamut);
-        world.Events.Add(1.0f, () => WarpIn(bahamut, ActionTimelineId.WarpEnd));
+        world.Events.Add(1.0f, () => bahamut?.PlayActionTimeline(ActionTimelineId.WarpEnd));
         world.Events.Add(2.49f, () => bahamut?.SetModelState(BahamutChargingModelState));
         world.Events.Add(2.56f, () => bahamut?.PlayActionTimeline(ActionTimelineId.BahamutDivineJudgmentPose));
         world.Events.Add(4.5f, SpawnTwintaniaAndNael);
-        world.Events.Add(5.0f, () => WarpIn(state.Twintania, ActionTimelineId.WarpEnd2));
-        world.Events.Add(5.0f, () => WarpIn(state.Nael, ActionTimelineId.WarpEnd));
+        world.Events.Add(5.0f, () => state.Twintania?.PlayActionTimeline(ActionTimelineId.WarpEnd2));
+        world.Events.Add(5.0f, () => state.Nael?.PlayActionTimeline(ActionTimelineId.WarpEnd));
         world.Events.Add(7.0f, TetherAddsToBahamut);
         world.Events.Add(8.0f, () => NaelSays(Text.StandGuard));
         world.Events.Add(11.56f, BahamutsFavor);
@@ -126,7 +130,7 @@ public sealed class UcobP4AddsScenario : IScenario
         world.Events.Add(29.08f, () => LiquidHell(pickTarget: false));
 
         world.Events.Add(30.18f, () => MarkHatchTargets(0));
-        world.Events.Add(30.28f, () => state.Twintania?.Cast(ActionId.Generate, castSeconds: 2.7f));
+        world.Events.Add(30.28f, () => state.Twintania?.Cast(ActionId.Generate));
         world.Events.Add(30.50f, () => SpawnOviforms(0));
         world.Events.Add(34.55f, ReleaseOviforms);
         world.Events.Add(35.43f, CastTwister);
@@ -142,12 +146,9 @@ public sealed class UcobP4AddsScenario : IScenario
         world.Events.Add(52.58f, CastTwister);
         world.Events.Add(53.86f, () => SnapshotTwisters(1));
         world.Events.Add(54.93f, () => SpawnTwisters(1));
-        world.Events.Add(60.55f, () => state.Nael?.Cast(ActionId.Megaflare, castSeconds: 4.7f));
-        world.Events.Add(65.54f, Megaflare);
-        world.Events.Add(69.69f, CastRavensbeak);
-        world.Events.Add(69.73f, CastDeathSentence);
-        world.Events.Add(73.65f, ResolveRavensbeak);
-        world.Events.Add(73.69f, ResolveDeathSentence);
+        world.Events.Add(60.55f, () => state.Nael?.Cast(Actions.Megaflare));
+        world.Events.Add(69.69f, () => state.Nael?.Cast(Actions.Ravensbeak, party.Get(state.NaelTank)));
+        world.Events.Add(69.73f, () => state.Twintania?.Cast(Actions.DeathSentence, party.Get(state.TwintaniaTank)));
         world.Events.Add(75.60f, () => BotTanksGiveNaelTo(PartyRole.MainTank));
         world.Events.Add(76.50f, () => BotTanksGiveTwintaniaTo(PartyRole.OffTank));
         world.Events.Add(77.84f, PlummetAndClaw);
@@ -159,7 +160,7 @@ public sealed class UcobP4AddsScenario : IScenario
         world.Events.Add(91.66f, () => LiquidHell(pickTarget: false));
 
         world.Events.Add(92.78f, () => MarkHatchTargets(1));
-        world.Events.Add(92.87f, () => state.Twintania?.Cast(ActionId.Generate, castSeconds: 2.7f));
+        world.Events.Add(92.87f, () => state.Twintania?.Cast(ActionId.Generate));
         world.Events.Add(93.11f, () => SpawnOviforms(1));
         world.Events.Add(97.15f, ReleaseOviforms);
         world.Events.Add(98.06f, CastTwister);
@@ -175,14 +176,11 @@ public sealed class UcobP4AddsScenario : IScenario
         world.Events.Add(115.20f, CastTwister);
         world.Events.Add(116.48f, () => SnapshotTwisters(3));
         world.Events.Add(117.55f, () => SpawnTwisters(3));
-        world.Events.Add(125.52f, CastDeathSentence);
-        world.Events.Add(126.24f, CastRavensbeak);
-        world.Events.Add(129.51f, ResolveDeathSentence);
+        world.Events.Add(125.52f, () => state.Twintania?.Cast(Actions.DeathSentence, party.Get(state.TwintaniaTank)));
+        world.Events.Add(126.24f, () => state.Nael?.Cast(Actions.Ravensbeak, party.Get(state.NaelTank)));
         world.Events.Add(130.00f, () => BotTanksGiveTwintaniaTo(PartyRole.MainTank));
-        world.Events.Add(130.22f, ResolveRavensbeak);
         world.Events.Add(130.90f, () => BotTanksGiveNaelTo(PartyRole.OffTank));
-        world.Events.Add(137.33f, () => state.Nael?.Cast(ActionId.Megaflare, castSeconds: 4.7f));
-        world.Events.Add(142.03f, Megaflare);
+        world.Events.Add(137.33f, () => state.Nael?.Cast(Actions.Megaflare));
         world.Events.Add(146.0f, DespawnAll);
     }
 
@@ -196,16 +194,18 @@ public sealed class UcobP4AddsScenario : IScenario
         UpdateTwisters();
     }
 
-    // A peer never runs Run, and the wall is fixed-time scenery.
-    public void RunInstanceEvents(SimWorld instanceWorld)
+    // With a human tank, swaps follow Provoke instead of the script: the add they provoke comes
+    // to them and the other add goes to the other tank.
+    public void OnPlayerActed(PlayerActed acted)
     {
-        instanceWorld.Events.Add(1.0f, () => PlayTeraflareWall(instanceWorld, steadyOn: false));
-        instanceWorld.Events.Add(6.2f, () => PlayTeraflareWall(instanceWorld, steadyOn: true));
-    }
+        if (!engaged || acted.ActionId != ActionId.Provoke || acted.Actor is not ISimPartyMember { Role: var role } || !role.IsTank()) return;
+        var coTank = role == PartyRole.MainTank ? PartyRole.OffTank : PartyRole.MainTank;
 
-    private static void PlayTeraflareWall(SimWorld instanceWorld, bool steadyOn) =>
-        instanceWorld.Map.PlaySharedGroupTimeline(TeraflareWall.Sgb,
-            steadyOn ? TeraflareWall.On : TeraflareWall.OffToOn, resetIndex: TeraflareWall.Off);
+        if (acted.Target == state.Nael && state.NaelTank != role)
+            AssignTanks(coTank, role);
+        else if (acted.Target == state.Twintania && state.TwintaniaTank != role)
+            AssignTanks(role, coTank);
+    }
 
     private void SpawnNeurolinks()
     {
@@ -221,35 +221,25 @@ public sealed class UcobP4AddsScenario : IScenario
             Level: UcobConstants.Level,
             Targetable: false,
             EnemyList: EnemyListMode.Never,
-            IsVisible: false,
+            Visibility: SpawnVisibility.HiddenUntilShown,
             Placement: new Placement(Geometry.BahamutSpawn, 0f)));
-    }
-
-    private static void WarpIn(SimEnemy? enemy, ushort warpTimeline)
-    {
-        enemy?.SetVisible(true);
-        enemy?.PlayActionTimeline(warpTimeline);
     }
 
     private void SpawnTwintaniaAndNael()
     {
-        state.Twintania = world.SpawnEnemy(new EnemySpawnConfig(
-            BNpcBaseId: BNpcBaseId.Twintania,
-            NameId: BNpcNameId.Twintania,
-            Level: UcobConstants.Level,
-            Targetable: false,
-            EnemyList: EnemyListMode.Manual,
-            IsVisible: false,
-            Placement: new Placement(Geometry.TwintaniaSpawn, 0f)));
-        state.Nael = world.SpawnEnemy(new EnemySpawnConfig(
-            BNpcBaseId: BNpcBaseId.NaelDeusDarnus,
-            NameId: BNpcNameId.NaelDeusDarnus,
-            Level: UcobConstants.Level,
-            Targetable: false,
-            EnemyList: EnemyListMode.Manual,
-            IsVisible: false,
-            Placement: new Placement(Geometry.NaelSpawn, 0f)));
+        state.Twintania = SpawnAdd(BNpcBaseId.Twintania, BNpcNameId.Twintania, Geometry.TwintaniaSpawn);
+        state.Nael = SpawnAdd(BNpcBaseId.NaelDeusDarnus, BNpcNameId.NaelDeusDarnus, Geometry.NaelSpawn);
     }
+
+    private SimEnemy? SpawnAdd(uint baseId, uint nameId, Vector3 position) =>
+        world.SpawnEnemy(new EnemySpawnConfig(
+            BNpcBaseId: baseId,
+            NameId: nameId,
+            Level: UcobConstants.Level,
+            Targetable: false,
+            EnemyList: EnemyListMode.Manual,
+            Visibility: SpawnVisibility.HiddenUntilShown,
+            Placement: new Placement(position, 0f)));
 
     private void TetherAddsToBahamut()
     {
@@ -260,7 +250,7 @@ public sealed class UcobP4AddsScenario : IScenario
 
     private void BahamutsFavor()
     {
-        bahamut?.Cast(ActionId.BahamutsFavor, castSeconds: 0f);
+        bahamut?.Cast(ActionId.BahamutsFavor);
         state.Twintania?.AddStatus(StatusId.DamageUp);
         state.Nael?.AddStatus(StatusId.DamageUp);
     }
@@ -283,7 +273,7 @@ public sealed class UcobP4AddsScenario : IScenario
     private void AssignTanks(PartyRole twintaniaTank, PartyRole naelTank)
     {
         if (twintaniaTank != state.TwintaniaTank) AnnounceSwap(twintaniaTank, "Twintania");
-        if (naelTank != state.NaelTank) AnnounceSwap(naelTank, UcobP4AddsConstants.Text.NaelName);
+        if (naelTank != state.NaelTank) AnnounceSwap(naelTank, Text.NaelName);
         state.AssignTanks(twintaniaTank, naelTank);
         if (!bossesHeld) FollowHolders();
     }
@@ -300,20 +290,7 @@ public sealed class UcobP4AddsScenario : IScenario
 
     private bool AnyHumanTank => IsHuman(PartyRole.MainTank) || IsHuman(PartyRole.OffTank);
 
-    private bool IsHuman(PartyRole role) => role == party.PlayerRole || party.Get(role) is SimNetworkPuppet;
-
-    // With a human tank, swaps follow Provoke instead of the script: the add they provoke comes
-    // to them and the other add goes to the other tank.
-    private void OnActionAttempted(PartyRole role, uint actionId, SimEnemy enemy)
-    {
-        if (!engaged || actionId != ActionId.Provoke || !role.IsTank()) return;
-        var coTank = role == PartyRole.MainTank ? PartyRole.OffTank : PartyRole.MainTank;
-
-        if (enemy == state.Nael && state.NaelTank != role)
-            AssignTanks(coTank, role);
-        else if (enemy == state.Twintania && state.TwintaniaTank != role)
-            AssignTanks(role, coTank);
-    }
+    private bool IsHuman(PartyRole role) => party.Get(role) is { } member && !party.IsBotDriven(member);
 
     private void FollowHolders()
     {
@@ -345,43 +322,33 @@ public sealed class UcobP4AddsScenario : IScenario
         world.Announce($"Tank swap: {boss} is now on {who}.");
     }
 
-    private void NaelSays(string text) => world.Announce(text, UcobP4AddsConstants.Text.NaelName);
+    private void NaelSays(string text) => world.Announce(text, Text.NaelName);
 
     private void SwingAutoAttacks(float delta)
     {
         if (!engaged) return;
-        twintaniaSwing = Swing(state.Twintania, state.TwintaniaTank, ActionId.TwintaniaAttack,
-            StatusId.SlashingResistanceDownII, "Twintania", twintaniaSwing - delta);
-        naelSwing = Swing(state.Nael, state.NaelTank, ActionId.NaelAttack,
-            StatusId.PiercingResistanceDownII, UcobP4AddsConstants.Text.NaelName, naelSwing - delta);
+        twintaniaSwing = Swing(state.Twintania, state.TwintaniaTank, Actions.TwintaniaAttack, twintaniaSwing - delta);
+        naelSwing = Swing(state.Nael, state.NaelTank, Actions.NaelAttack, naelSwing - delta);
     }
 
-    // An auto from the add whose buster left its resistance-down on this tank is lethal:
-    // the other tank should have taken the add first.
-    private float Swing(SimEnemy? boss, PartyRole holder, uint attackId, ushort ownBusterVuln, string bossName, float untilNext)
+    // A cast holds the next swing back a full interval, so a buster isn't chased by an auto
+    // before the tanks can swap.
+    private float Swing(SimEnemy? boss, PartyRole holder, EnemyAction attack, float untilNext)
     {
+        if (boss is not { IsActive: true }) return 0f;
+        if (boss.AnimationLock) return AutoAttackInterval;
         if (untilNext > 0f) return untilNext;
-        if (boss is not { IsActive: true } || boss.AnimationLock) return 0f;
         if (party.Get(holder) is not { } tank || !tank.IsAlive()) return 0f;
-        boss.Cast(attackId, castSeconds: 0f, targetId: tank.GameObjectId);
-        if (tank.HasStatus(ownBusterVuln))
-            tank.Die($"{bossName} auto-attacked them while they still had the vulnerability from its tank buster. The other tank needed to take {bossName} right after the buster.");
+        boss.Cast(attack, tank);
         return AutoAttackInterval;
     }
 
     private void PlummetAndClaw()
     {
-        if (state.Twintania is { } twin && party.Get(state.TwintaniaTank) is { } twinTank && twinTank.IsAlive())
-        {
-            twin.Cast(ActionId.Plummet, castSeconds: 0f, targetId: twinTank.GameObjectId);
-            var cleave = new Placement(twin.Position, 0f).Face(twinTank.Position);
-            foreach (var hit in party.Find.InsideCone(cleave, Geometry.PlummetHalfAngle, Geometry.PlummetLength).ToList())
-                if (hit != twinTank)
-                    hit.Die("Hit by Plummet, Twintania's frontal cleave on her tank. Only her tank should be in front of Twintania.");
-        }
-
+        if (party.Get(state.TwintaniaTank) is { } twinTank && twinTank.IsAlive())
+            state.Twintania?.Cast(Actions.Plummet, twinTank);
         if (party.Get(state.NaelTank) is { } naelTank && naelTank.IsAlive())
-            state.Nael?.Cast(ActionId.BahamutsClaw, castSeconds: 0f, targetId: naelTank.GameObjectId);
+            state.Nael?.Cast(Actions.BahamutsClaw, naelTank);
     }
 
     // The farthest player from Twintania at the first drop gets all five puddles, each dropped
@@ -389,15 +356,13 @@ public sealed class UcobP4AddsScenario : IScenario
     private void LiquidHell(bool pickTarget)
     {
         if (state.Twintania is not { } twin) return;
-        if (pickTarget) state.LiquidHellTarget = party.Find.Farest(twin.Position);
-        if (state.LiquidHellTarget is not { } target || !target.IsAlive()) return;
+        if (pickTarget) liquidHellTarget = party.Find.Farest(twin.Position);
+        if (liquidHellTarget is not { } target || !target.IsAlive()) return;
 
         var at = target.Position;
-        twin.Cast(ActionId.LiquidHell, targetLocation: at, castSeconds: 0f, animationLock: 0f);
+        twin.Cast(Actions.LiquidHell, at);
         SpawnActiveEObj(EObjId.LiquidHellPuddle, at, LiquidHellPuddleLifetime);
         puddles.Add((at, clock + LiquidHellPuddleArmDelay, clock + LiquidHellPuddleLifetime));
-        foreach (var hit in party.Find.InsideCircle(at, Geometry.LiquidHellRadius))
-            damage.ApplyDamage(hit, 0.2f, ActionId.LiquidHell, "puddle", lethal: false);
     }
 
     private void BurnPuddleStandersInLiquidHell()
@@ -406,10 +371,10 @@ public sealed class UcobP4AddsScenario : IScenario
         foreach (var puddle in puddles)
         {
             if (clock < puddle.ArmAt) continue;
-            foreach (var member in party.Find.InsideCircle(puddle.Center, Geometry.LiquidHellPuddleRadius).ToList())
+            foreach (var member in party.Find.InsideCircle(puddle.Center, Geometry.LiquidHellPuddleRadius))
             {
                 if (burning.Exists(b => b.Member == member)) continue;
-                member.AddStatus(StatusId.Burns, 15f);
+                member.AddStatus(StatusId.Burns, BurnsDuration);
                 burning.Add((member, clock + BurnsDeathDelay));
             }
         }
@@ -417,7 +382,8 @@ public sealed class UcobP4AddsScenario : IScenario
         for (var i = burning.Count - 1; i >= 0; i--)
         {
             if (clock < burning[i].DiesAt) continue;
-            burning[i].Member.Die($"Burns from a Liquid Hell puddle. Puddles turn deadly {LiquidHellPuddleArmDelay:0.#}s after they drop, so keep moving away from them.");
+            burning[i].Member.DieOfStatus(StatusId.Burns,
+                $"stood in a Liquid Hell puddle; puddles turn deadly {LiquidHellPuddleArmDelay:0.#}s after they drop, so keep moving away from them");
             burning.RemoveAt(i);
         }
     }
@@ -426,7 +392,7 @@ public sealed class UcobP4AddsScenario : IScenario
     {
         foreach (var role in state.Hatches[set].Targets)
             if (party.Get(role) is { } member && member.IsAlive())
-                member.AttachLockonVfx(LockonId.Hatch, persistent: false);
+                member.AttachLockonVfx(LockonId.Hatch);
     }
 
     private void SpawnOviforms(int set)
@@ -441,7 +407,6 @@ public sealed class UcobP4AddsScenario : IScenario
                 Level: UcobConstants.Level,
                 Targetable: false,
                 EnemyList: EnemyListMode.Never,
-                IsVisible: true,
                 Placement: new Placement(twin.Position, twin.Rotation)));
             if (orb == null) continue;
             orb.SetTarget(target, follow: false);
@@ -498,32 +463,14 @@ public sealed class UcobP4AddsScenario : IScenario
     private void PopOviform(HatchOrb orb)
     {
         orb.Orb.Follow(null);
-        orb.Orb.Cast(ActionId.Hatch, castSeconds: 0f, targetId: orb.Target.GameObjectId);
-        var target = orb.Target;
-
-        if (!target.HasStatus(StatusId.Neurolink))
-        {
-            target.Die("Their Hatch orb reached them outside a Neurolink. Hatch targets must be standing in their Neurolink when the orb arrives.");
-            orb.Orb.Cast(ActionId.DeepHatch, castSeconds: 0f);
-            party.WipeAllPlayers("Deep Hatch: a Hatch orb reached its target outside a Neurolink, which wipes the party.");
-            return;
-        }
-
-        if (target.HasStatus(StatusId.ManaHypersensitivity))
-        {
-            target.Die("Took a second Hatch while still Mana Hypersensitive from the previous one.");
-            return;
-        }
-        damage.ApplyDamage(target, 0.3f, ActionId.Hatch, "neurolink", lethal: false);
-        target.AddStatus(StatusId.ManaHypersensitivity, 16f);
+        orb.Orb.Cast(orb.Target.HasStatus(StatusId.Neurolink) ? Actions.Hatch : Actions.DeepHatch, orb.Target);
     }
 
-    private void CastTwister() => state.Twintania?.Cast(ActionId.Twister, castSeconds: 1.7f);
+    private void CastTwister() => state.Twintania?.Cast(ActionId.Twister);
 
     private void RemoveTwister(Twister twister)
     {
-        state.LiveTwisters.RemoveAll(t => FlatDistance(t, twister.Helper.Position) < 0.1f);
-        twister.Helper.Despawn();
+        state.LiveTwisters.RemoveAll(t => FlatDistance(t, twister.Position) < 0.1f);
         twister.Visual?.Despawn();
         world.Obstacles.Remove(twister.KeepOut);
     }
@@ -538,8 +485,7 @@ public sealed class UcobP4AddsScenario : IScenario
         });
 
     // Retail drops four twisters under random players, placed where they stood about 3/4 of
-    // the way through Twister's cast; touching one kills that player and throws everyone
-    // within 8y 50y (Knockback row 0x6F), i.e. into the wall.
+    // the way through Twister's cast.
     private void SnapshotTwisters(int set)
     {
         var snapshot = state.TwisterSnapshots[set];
@@ -554,18 +500,10 @@ public sealed class UcobP4AddsScenario : IScenario
     {
         foreach (var (_, position) in state.TwisterSnapshots[set])
         {
-            var helper = world.SpawnEnemy(new EnemySpawnConfig(
-                BNpcBaseId: BNpcBaseId.Helper,
-                Level: UcobConstants.Level,
-                Targetable: false,
-                EnemyList: EnemyListMode.Never,
-                IsVisible: true,
-                Placement: new Placement(position, 0f)));
-            if (helper == null) continue;
             var visual = SpawnActiveEObj(EObjId.Twister, position);
             var keepOut = world.Obstacles.Add(new CircleObstacle(
                 new Vector2(position.X, position.Z), Geometry.TwisterKeepOutRadius));
-            twisters.Add(new Twister(helper, visual, keepOut, clock + TwisterArmDelay, clock + TwisterLifetime));
+            twisters.Add(new Twister(position, visual, keepOut, clock + TwisterArmDelay, clock + TwisterLifetime));
         }
     }
 
@@ -582,26 +520,14 @@ public sealed class UcobP4AddsScenario : IScenario
             }
             if (twister.Burst || clock < twister.ArmAt) continue;
 
-            var victim = party.Find.Closest(twister.Helper.Position);
-            if (victim == null || FlatDistance(victim.Position, twister.Helper.Position) > Geometry.TwisterTriggerRadius)
+            var victim = party.Find.Closest(twister.Position);
+            if (victim == null || FlatDistance(victim.Position, twister.Position) > Geometry.TwisterTriggerRadius)
                 continue;
 
-            BurstTwister(twister, victim);
+            twister.Burst = true;
+            twister.ExpireAt = clock + TwisterBurstLinger;
+            state.Twintania?.CastFromHelper(Actions.TwisterBurst, victim, at: new Placement(twister.Position, 0f));
         }
-    }
-
-    private void BurstTwister(Twister twister, SimCharacter victim)
-    {
-        twister.Burst = true;
-        twister.ExpireAt = clock + TwisterBurstLinger;
-        var source = twister.Helper.Position;
-        twister.Helper.Cast(ActionId.TwisterBurst, castSeconds: 0f, targetId: victim.GameObjectId);
-
-        var flung = party.Find.InsideCircle(source, Geometry.TwisterKnockbackRadius).Where(m => m != victim).ToList();
-        victim.Die("Walked into a Twister. Twisters drop where four players stood near the end of Twintania's cast; step off your spot as the cast finishes and don't walk back through them.");
-        if (!KnockbackLookup.TryGet(KnockbackId.TwisterBurst, out var distance, out var speed)) return;
-        foreach (var member in flung)
-            (member as ISimPartyMember)?.Knockback(source, distance, speed);
     }
 
     private void ResolveNaelMove(int quote, int step)
@@ -610,103 +536,26 @@ public sealed class UcobP4AddsScenario : IScenario
         switch (state.Quotes[quote].Moves[step])
         {
             case NaelMove.Chariot:
-                nael.Cast(ActionId.IronChariot, castSeconds: 0f);
-                foreach (var hit in party.Find.InsideCircle(nael.Position, Geometry.ChariotRadius).ToList())
-                    hit.Die($"Hit by Iron Chariot: they were within {Geometry.ChariotRadius:0.#}y of Nael. Get out for Chariot.");
+                nael.Cast(Actions.IronChariot);
                 break;
             case NaelMove.Dynamo:
-                nael.Cast(ActionId.LunarDynamo, castSeconds: 0f);
-                foreach (var hit in party.Find.InsideRing(nael.Position, Geometry.DynamoInnerRadius, Geometry.DynamoOuterRadius).ToList())
-                    hit.Die($"Hit by Lunar Dynamo: they were more than {Geometry.DynamoInnerRadius:0.#}y from Nael. Get in close for Dynamo.");
+                nael.Cast(Actions.LunarDynamo);
                 break;
             case NaelMove.Beam:
-                ThermionicBeam(nael, state.BeamTargets[quote]);
+                if (AliveOrAnyone(state.BeamTargets[quote]) is { } stackTarget)
+                    nael.Cast(Actions.ThermionicBeam(Math.Min(ThermionicBeamStack, party.ActiveMembers().Count())), stackTarget);
                 break;
             case NaelMove.Dive:
-                RavenDive(nael, state.DiveTargets[quote]);
+                if (AliveOrAnyone(state.DiveTargets[quote]) is { } diveTarget)
+                    nael.Cast(Actions.RavenDive, diveTarget);
                 break;
         }
-    }
-
-    private void ThermionicBeam(SimEnemy nael, PartyRole preferred)
-    {
-        if (AliveOrAnyone(preferred) is not { } target) return;
-        nael.Cast(ActionId.ThermionicBeam, targetLocation: target.Position, castSeconds: 0f, targetId: target.GameObjectId);
-
-        var needed = Math.Min(MinThermionicBeamStack, party.ActiveMembers().Count());
-        var stack = party.Find.InsideCircle(target.Position, Geometry.ThermionicBeamRadius).ToList();
-        foreach (var hit in stack)
-        {
-            if (stack.Count < needed)
-                hit.Die($"Thermionic Beam was split by only {stack.Count} players (it needs {needed}). Stack together for the beam.");
-            else
-                damage.ApplyDamage(hit, 0.5f, ActionId.ThermionicBeam, "stack", lethal: false);
-        }
-    }
-
-    private void RavenDive(SimEnemy nael, PartyRole preferred)
-    {
-        if (AliveOrAnyone(preferred) is not { } target) return;
-        nael.Cast(ActionId.RavenDive, targetLocation: target.Position, castSeconds: 0f, targetId: target.GameObjectId);
-
-        damage.ApplyDamage(target, 0.4f, ActionId.RavenDive, "dive", lethal: false);
-        foreach (var hit in party.Find.InsideCircle(target.Position, Geometry.RavenDiveRadius).Where(m => m != target).ToList())
-            hit.Die($"Stood within {Geometry.RavenDiveRadius:0.#}y of the Raven Dive target. Spread out for the dive.");
     }
 
     private SimCharacter? AliveOrAnyone(PartyRole preferred)
     {
         if (party.Get(preferred) is { } member && member.IsAlive()) return member;
-        return party.Find.RandomMember();
-    }
-
-    private void Megaflare()
-    {
-        foreach (var member in party.ActiveMembers().ToList())
-            damage.ApplyDamage(member, 0.45f, ActionId.Megaflare, "raidwide", lethal: false);
-    }
-
-    private void CastRavensbeak()
-    {
-        state.RavensbeakTarget = party.Get(state.NaelTank);
-        if (state.RavensbeakTarget is { } t && t.IsAlive())
-            state.Nael?.Cast(ActionId.Ravensbeak, castSeconds: 3.7f, targetId: t.GameObjectId);
-    }
-
-    private void CastDeathSentence()
-    {
-        state.DeathSentenceTarget = party.Get(state.TwintaniaTank);
-        if (state.DeathSentenceTarget is { } t && t.IsAlive())
-            state.Twintania?.Cast(ActionId.DeathSentence, castSeconds: 3.7f, targetId: t.GameObjectId);
-    }
-
-    private void ResolveRavensbeak()
-    {
-        naelSwing = AutoAttackInterval;
-        ResolveTankBuster(state.RavensbeakTarget, ActionId.Ravensbeak, StatusId.PiercingResistanceDownII, 45f, "Ravensbeak");
-    }
-
-    private void ResolveDeathSentence()
-    {
-        twintaniaSwing = AutoAttackInterval;
-        ResolveTankBuster(state.DeathSentenceTarget, ActionId.DeathSentence, StatusId.SlashingResistanceDownII, 34f, "Death Sentence");
-    }
-
-    private void ResolveTankBuster(SimCharacter? target, uint actionId, ushort debuff, float debuffSeconds, string name)
-    {
-        if (target == null || !target.IsAlive()) return;
-        if (target is not ISimPartyMember { Role: PartyRole.MainTank or PartyRole.OffTank })
-        {
-            target.Die($"Took {name}, a tank buster, as a non-tank.");
-            return;
-        }
-        if (target.HasStatus(debuff))
-        {
-            target.Die($"Took {name} while still carrying the vulnerability from the previous {name}.");
-            return;
-        }
-        damage.ApplyDamage(target, 0.6f, actionId, "tank buster", lethal: false);
-        target.AddStatus(debuff, debuffSeconds);
+        return party.Find.RandomMember(world.Rng);
     }
 
     private void DespawnAll()

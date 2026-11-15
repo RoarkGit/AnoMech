@@ -1,5 +1,6 @@
 using System;
 using AnoMech.Core.Game;
+using AnoMech.Scenarios;
 
 namespace AnoMech.Core.SimObjects;
 
@@ -19,6 +20,7 @@ namespace AnoMech.Core.SimObjects;
 //       · PassableEnd        — the closest member intercepting the beam toward
 //                              the anchor takes it over.
 //       · FarthestPlayerEnd  — the party member farthest from the anchor.
+//       · ClosestPlayerEnd   — the party member closest to the anchor.
 //
 // Dynamic ends are defined relative to a stable reference, so a tether must have
 // at least one fixed end. That invariant is enforced at the call site by the
@@ -38,7 +40,7 @@ public interface ITetherEnd
 
 // What dynamic ends need to look up: the party (proximity queries) and the
 // channeling id (to skip members already holding a parallel tether of the same id).
-public readonly record struct TetherContext(CharacterFind<SimCharacter> Party, ushort TetherId);
+public readonly record struct TetherContext(CharacterFind<SimCharacter> Party, ushort TetherId, Rng Rng);
 
 // Internal — scenarios express a fixed end by passing the SimCharacter directly
 // (see the SimWorld.Tether overloads); this is just the ITetherEnd wrapper.
@@ -64,6 +66,8 @@ public abstract class DynamicEnd : ITetherEnd
 //
 // The initial holder is the seed passed to End.Passable(member); with no seed
 // (End.Passable()) a random alive party member is chosen on the first resolve.
+// The seeding resolve (self = null) never migrates: parallel tethers created in
+// the same frame only shield each other's holders once all of them exist.
 public sealed class PassableEnd : DynamicEnd
 {
     // A candidate must be at least this far *ahead* of the holder along the beam
@@ -84,8 +88,9 @@ public sealed class PassableEnd : DynamicEnd
 
     public override SimCharacter? Resolve(SimCharacter? self, SimCharacter? other, TetherContext ctx)
     {
-        var holder = self ?? initial ?? ctx.Party.RandomMember();
-        if (holder is null || !holder.IsAlive()) return holder;
+        if (self is null) return initial ?? ctx.Party.RandomMember(ctx.Rng);
+        var holder = self;
+        if (!holder.IsAlive()) return holder;
         if (other is null || !other.IsAlive()) return holder;   // anchor gone → don't migrate
 
         var holderPos = holder.Position;
@@ -127,6 +132,16 @@ public sealed class FarthestPlayerEnd : DynamicEnd
     }
 }
 
+// Re-targets to the party member closest to the anchor each tick.
+public sealed class ClosestPlayerEnd : DynamicEnd
+{
+    public override SimCharacter? Resolve(SimCharacter? self, SimCharacter? other, TetherContext ctx)
+    {
+        if (other is null) return self;
+        return ctx.Party.Closest(other.Position) ?? self;
+    }
+}
+
 // Factory for the dynamic end specs — keeps call sites reading as
 // world.Tether(boss, End.Passable(member), ...). A fixed end is the raw
 // SimCharacter, so End.Fixed is internal (used only by the SimWorld overloads).
@@ -136,4 +151,5 @@ public static class End
     // initial = null → a random alive party member is chosen on the first resolve.
     public static PassableEnd Passable(SimCharacter? initial = null, float halfWidth = 0.5f) => new(initial, halfWidth);
     public static FarthestPlayerEnd FarthestPlayer() => new();
+    public static ClosestPlayerEnd ClosestPlayer() => new();
 }

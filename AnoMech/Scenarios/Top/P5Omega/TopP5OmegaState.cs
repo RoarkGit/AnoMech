@@ -14,7 +14,7 @@ public sealed record MonitorSide(int Mul, uint ActionId)
 
 public sealed class TopP5OmegaState
 {
-    private readonly Rng rng = new();
+    private readonly Rng rng = Rng.Detached;
     
     public RoleList HelloWorldTargets { get; }
     public RoleList DoubleDynamicTargets { get; }
@@ -23,6 +23,7 @@ public sealed class TopP5OmegaState
     // The four outside HelloWorldTargets[0..1] and MonitorTargets, in first Hello World jump
     // order; resolved here for the same reason.
     public RoleList HelloWorld1JumpOrder { get; }
+    public RoleList BlasterTetherTargets { get; }
 
     public IReadOnlyList<Direction> AttackDirections { get; }
     public IReadOnlyList<OmegaAttack> OmegaAttacks { get; } 
@@ -31,10 +32,11 @@ public sealed class TopP5OmegaState
 
     public MonitorSide MonitorSide { get; }
 
-    public TopP5OmegaState(SimParty party, TopP5OmegaStateOverrides overrides)
+    public TopP5OmegaState(Rng rng, SimParty party, TopP5OmegaStateOverrides overrides)
     {
-        var firstAttackDirection = rng.NextIntercardinal();
-        var secondAttackDirection = firstAttackDirection.Rotate(rng.NextSign() * 2);
+        this.rng = rng;
+        var firstAttackDirection = overrides.FirstAttackDirection ?? rng.NextIntercardinal();
+        var secondAttackDirection = overrides.SecondAttackDirection ?? firstAttackDirection.Rotate(rng.NextSign() * 2);
         AttackDirections = [firstAttackDirection, firstAttackDirection.Flip(), secondAttackDirection, secondAttackDirection.Flip()];
         var (helloSlots, helloMembership) = overrides.ResolveHelloWorld(party.PlayerRole);
         HelloWorldTargets = new RoleListBuilder
@@ -42,13 +44,13 @@ public sealed class TopP5OmegaState
             Size = 4,
             Slots = helloSlots,
             Membership = helloMembership,
-        }.Build(party);
+        }.Build(rng, party);
         DoubleDynamicTargets = new RoleListBuilder
         {
             Size = 4,
             Membership = overrides.ResolveExtraDynamis(party.PlayerRole),
-        }.Build(party);
-        MonitorTargets = new RoleList(party, ResolveMonitorTargets());
+        }.Build(rng, party);
+        MonitorTargets = new RoleList(party, overrides.MonitorTargets ?? ResolveMonitorTargets());
         BettleSpawnDirection = overrides.BettleSpawnDirection ?? rng.NextCardinal();
         MonitorSide = overrides.MonitorSide ?? rng.NextObj(MonitorSide.Left, MonitorSide.Right);
         FirstWaveCannonFront = overrides.FirstWaveCannonFront ?? rng.NextBool();
@@ -65,8 +67,14 @@ public sealed class TopP5OmegaState
             if (overrides is { SecondFAttack: not null, SecondMAttack: not null }) break;
         }
         OmegaAttacks = [firstFAttack, firstMAttack, secondFAttack, secondMAttack];
-        HelloWorld1JumpOrder = new RoleList(party, Enum.GetValues<PartyRole>())
-            .Random(rng, 4, MonitorTargets[0], MonitorTargets[1], HelloWorldTargets[0], HelloWorldTargets[1]);
+        HelloWorld1JumpOrder = overrides.HelloWorld1JumpOrder is { } pinnedJumpOrder
+            ? new RoleList(party, pinnedJumpOrder)
+            : new RoleList(party, Enum.GetValues<PartyRole>())
+                .Random(rng, 4, MonitorTargets[0], MonitorTargets[1], HelloWorldTargets[0], HelloWorldTargets[1]);
+        BlasterTetherTargets = overrides.BlasterTethers is { } pinnedBlasterTethers
+            ? new RoleList(party, pinnedBlasterTethers)
+            : RoleList.Random(rng, party, 2);
+        HelloWorld2 = overrides.HelloWorld2?.ToArray();
     }
 
     private OmegaAttack RandomFAttack() => rng.NextObj(OmegaAttack.Legs, OmegaAttack.Staff);
@@ -105,6 +113,7 @@ public sealed class TopP5OmegaState
         DoubleDynamicTargets = new RoleList(party, doubleDynamicTargets);
         MonitorTargets = new RoleList(party, monitorTargets);
         HelloWorld1JumpOrder = new RoleList(party, helloWorld1JumpOrder);
+        BlasterTetherTargets = RoleList.Empty();
         AttackDirections = attackDirectionsRadians.Select(r => new Direction(r)).ToList();
         OmegaAttacks = omegaAttacks;
         BettleSpawnDirection = new Direction(bettleSpawnDirectionRadians);

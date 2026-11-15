@@ -1,9 +1,9 @@
 using System.Collections.Generic;
+using AnoMech.Core.EnemyActions;
+using AnoMech.Core.Native.Interfaces;
 using AnoMech.Core.SimObjects;
 
 namespace AnoMech.Core.UserActions;
-
-public enum DamageKind { Physical, Magic }
 
 // What one status contributes to surviving a hit. Everything is a fraction (0.20f = 20%)
 // except ShieldPotency; a status sets only what it grants. ShieldHp and MaxHp are fractions
@@ -17,9 +17,12 @@ public readonly record struct Mitigation(
 
     private const float Invulnerable = 1f;
 
+    // Off, no hit checks mitigation, so nothing a bot could press would change the outcome.
+    public static bool Required => Plugin.Config.EnableTankMitigation && Natives.UserActions.Enabled;
+
     public bool IsShield => ShieldHp > 0f || ShieldPotency > 0f;
 
-    public static bool IsInvuln(ushort statusId) => ByStatusId.TryGetValue(statusId, out var m) && m.Damage >= Invulnerable;
+    private float ShieldFractionOfMaxHp => ShieldHp + ShieldPotency * ShieldHpPerPotency;
 
     public static readonly IReadOnlyDictionary<ushort, Mitigation> ByStatusId = new Dictionary<ushort, Mitigation>
     {
@@ -78,10 +81,20 @@ public readonly record struct Mitigation(
         foreach (var id in statusIds)
         {
             if (!ByStatusId.TryGetValue(id, out var m)) continue;
-            taken *= (1f - m.Damage) * (1f - (kind == DamageKind.Magic ? m.Magic : m.Physical));
-            pool += m.ShieldHp + m.ShieldPotency * ShieldHpPerPotency + m.MaxHp;
+            taken *= (1f - m.Damage) * (1f - kind switch { DamageKind.Magic => m.Magic, DamageKind.Physical => m.Physical, _ => 0f });
+            pool += m.ShieldFractionOfMaxHp + m.MaxHp;
         }
         return 1f - taken / pool;
+    }
+
+    // Banked shield as a fraction of max HP: what the gold overlay on the HP bar shows.
+    public static float ShieldFraction(IEnumerable<ushort> statusIds)
+    {
+        var shield = 0f;
+        foreach (var id in statusIds)
+            if (ByStatusId.TryGetValue(id, out var m))
+                shield += m.ShieldFractionOfMaxHp;
+        return shield;
     }
 
     // A shield is used up by the hit it was counted against. A status carries either a

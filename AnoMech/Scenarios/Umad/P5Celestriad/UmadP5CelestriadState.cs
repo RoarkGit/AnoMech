@@ -1,3 +1,4 @@
+using AnoMech.Core.EnemyActions;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -6,39 +7,30 @@ using AnoMech.Core;
 using AnoMech.Core.Game.Party;
 using AnoMech.Core.SimObjects;
 using static AnoMech.Scenarios.Umad.UmadConstants;
-using static AnoMech.Scenarios.Umad.P5Celestriad.UmadP5CelestriadConstants;
 
 namespace AnoMech.Scenarios.Umad.P5Celestriad;
 
 // Stable element identities. Physical sector order is rolled separately for each run.
-public sealed record CelestriadElement(
-    uint TowerSoakedActionId,
-    uint TowerFailedActionId,
-    DamageType DamageType,
-    ushort VulnUpStatusId,
-    uint TowerEObjId)
+public sealed record CelestriadElement(EnemyAction Tower, ushort VulnUpStatusId, uint TowerEObjId)
 {
     public static readonly CelestriadElement Fire =
-        new(CelestriadActionId.FireIII, CelestriadActionId.StardustFireIII,
-            DamageType.Fire, CelestriadStatusId.FireResistanceDownII, CelestriadTowerEObjId.Fire);
+        new(UmadActions.CelestriadFireTower, StatusId.FireResistanceDownII, EObjId.CelestriadFireTower);
     public static readonly CelestriadElement Lightning =
-        new(CelestriadActionId.ThunderIII, CelestriadActionId.StardustThunderIII,
-            DamageType.Lightning, UmadConstants.StatusId.LightningResistanceDownII, CelestriadTowerEObjId.Lightning);
+        new(UmadActions.CelestriadLightningTower, StatusId.LightningResistanceDownII, EObjId.CelestriadLightningTower);
     public static readonly CelestriadElement Ice =
-        new(CelestriadActionId.BlizzardIII, CelestriadActionId.StardustBlizzardIII,
-            DamageType.Ice, CelestriadStatusId.IceResistanceDownII, CelestriadTowerEObjId.Ice);
+        new(UmadActions.CelestriadIceTower, StatusId.IceResistanceDownII, EObjId.CelestriadIceTower);
 }
 
-public sealed record CatastrophicChoice(uint CastActionId, uint ResolveActionId)
+public sealed record CatastrophicChoice(uint CastActionId, EnemyAction Resolution)
 {
     public static readonly CatastrophicChoice Aero =
-        new(CelestriadActionId.CatastrophicChoiceAero, CelestriadActionId.CatastrophicChoiceAeroResolution);
+        new(ActionId.CatastrophicChoiceAero, UmadActions.CatastrophicChoiceAero);
     public static readonly CatastrophicChoice Earth =
-        new(CelestriadActionId.CatastrophicChoiceEarth, CelestriadActionId.CatastrophicChoiceEarthResolution);
+        new(ActionId.CatastrophicChoiceEarth, UmadActions.CatastrophicChoiceEarth);
 }
 
 // One of the 9 fixed towers, spawned once for the whole mechanic; position never changes.
-public sealed record CelestriadTower(CelestriadElement Element, int SubIndex, Vector3 Position);
+public sealed record CelestriadTower(CelestriadElement Element, int SubIndex, int RingIndex, Vector3 Position);
 
 // Per-run randomization: the three sectors' elements, each party role's permanent debuff
 // (an element or "free"), which element doubles up on each set, which ring towers are active,
@@ -53,7 +45,7 @@ public sealed record CelestriadTower(CelestriadElement Element, int SubIndex, Ve
 // randomization itself. State only ever exposes what's actually random.
 public sealed class UmadP5CelestriadState
 {
-    private readonly Rng rng = new();
+    private readonly Rng rng = Rng.Detached;
 
     // Clockwise sector shift from a debuffed player's own element in this run's layout:
     // set 0 -> next sector, set 1 -> sector after that, set 2 -> own element again.
@@ -85,24 +77,20 @@ public sealed class UmadP5CelestriadState
             ? TowerElementOrder[(TowerElementOrder.ToList().IndexOf(own) + SetOffset[set]) % TowerElementOrder.Count]
             : DoubleElement[set];
 
-    public UmadP5CelestriadState(SimParty party, UmadP5CelestriadStateOverrides overrides)
+    public UmadP5CelestriadState(Rng rng, SimParty party, UmadP5CelestriadStateOverrides overrides)
     {
+        this.rng = rng;
         // Each element doubles exactly once across the 3 sets: a shuffled permutation
         // guarantees that instead of leaving it to independent per-set coin flips.
-        DoubleElement = overrides.DoubleOrder switch
-        {
-            CelestriadDoubleOrder.FireIceLightning => [CelestriadElement.Fire, CelestriadElement.Ice, CelestriadElement.Lightning],
-            CelestriadDoubleOrder.FireLightningIce => [CelestriadElement.Fire, CelestriadElement.Lightning, CelestriadElement.Ice],
-            CelestriadDoubleOrder.IceFireLightning => [CelestriadElement.Ice, CelestriadElement.Fire, CelestriadElement.Lightning],
-            CelestriadDoubleOrder.IceLightningFire => [CelestriadElement.Ice, CelestriadElement.Lightning, CelestriadElement.Fire],
-            CelestriadDoubleOrder.LightningFireIce => [CelestriadElement.Lightning, CelestriadElement.Fire, CelestriadElement.Ice],
-            CelestriadDoubleOrder.LightningIceFire => [CelestriadElement.Lightning, CelestriadElement.Ice, CelestriadElement.Fire],
-            _ => rng.Shuffle(CelestriadElement.Fire, CelestriadElement.Ice, CelestriadElement.Lightning),
-        };
+        DoubleElement = overrides.DoubleOrder is { } doubleOrder
+            ? Order(doubleOrder)
+            : rng.Shuffle(CelestriadElement.Fire, CelestriadElement.Ice, CelestriadElement.Lightning);
 
         PlayerDebuffElement = AssignDebuffs(party, overrides);
 
-        TowerElementOrder = rng.Shuffle(CelestriadElement.Fire, CelestriadElement.Lightning, CelestriadElement.Ice);
+        TowerElementOrder = overrides.SectorOrder is { } sectorOrder
+            ? Order(sectorOrder)
+            : rng.Shuffle(CelestriadElement.Fire, CelestriadElement.Lightning, CelestriadElement.Ice);
         AllTowers = BuildAllTowers();
 
         var setActive = new List<IReadOnlyList<int>>(3);
@@ -116,7 +104,9 @@ public sealed class UmadP5CelestriadState
                 // Which sub-towers light up is random; sorted ascending so a doubled element's
                 // pair always lists in a stable, deterministic clockwise order for whoever reads
                 // "first" vs "second" out of it (the AI, when deciding who goes where).
-                var subs = rng.Shuffle(0, 1, 2).Take(isDouble ? 2 : 1).OrderBy(s => s).ToArray();
+                int[] subs = overrides.FixedLitTowers
+                    ? isDouble ? [0, 2] : [1]
+                    : rng.Shuffle(0, 1, 2).Take(isDouble ? 2 : 1).OrderBy(s => s).ToArray();
                 var elementStart = Array.IndexOf(Elements, element) * 3;
                 active.AddRange(subs.Select(s => elementStart + s));
             }
@@ -184,7 +174,7 @@ public sealed class UmadP5CelestriadState
         var towers = new List<CelestriadTower>(Elements.Length * SubTowersPerElement);
         foreach (var element in Elements)
             for (var sub = 0; sub < SubTowersPerElement; sub++)
-                towers.Add(new CelestriadTower(element, sub, TowerPosition(element, sub)));
+                towers.Add(new CelestriadTower(element, sub, RingIndex(element, sub), TowerPosition(element, sub)));
         return towers;
     }
 
@@ -216,13 +206,23 @@ public sealed class UmadP5CelestriadState
         }
 
         var next = 0;
-        foreach (var role in RoleList.Random(party).List)
+        foreach (var role in RoleList.Random(rng, party).List)
         {
             if (assigned.ContainsKey(role) || next >= pool.Count) continue;
             assigned[role] = pool[next++];
         }
         return assigned;
     }
+
+    private static IReadOnlyList<CelestriadElement> Order(CelestriadElementOrder order) => order switch
+    {
+        CelestriadElementOrder.FireIceLightning => [CelestriadElement.Fire, CelestriadElement.Ice, CelestriadElement.Lightning],
+        CelestriadElementOrder.FireLightningIce => [CelestriadElement.Fire, CelestriadElement.Lightning, CelestriadElement.Ice],
+        CelestriadElementOrder.IceFireLightning => [CelestriadElement.Ice, CelestriadElement.Fire, CelestriadElement.Lightning],
+        CelestriadElementOrder.IceLightningFire => [CelestriadElement.Ice, CelestriadElement.Lightning, CelestriadElement.Fire],
+        CelestriadElementOrder.LightningFireIce => [CelestriadElement.Lightning, CelestriadElement.Fire, CelestriadElement.Ice],
+        _ => [CelestriadElement.Lightning, CelestriadElement.Ice, CelestriadElement.Fire],
+    };
 
     private static CelestriadElement? ElementFor(CelestriadDebuff debuff) => debuff switch
     {
@@ -249,14 +249,16 @@ public sealed class UmadP5CelestriadState
         _ => null, // set 1 (index 1, the "second" soak) has no Catastrophic Choice
     };
 
-    // 9 towers 40 degrees apart clockwise from north, grouped as 3 contiguous per-element blocks
-    // (not interleaved) starting 20 degrees off north, confirmed against the real EObj spawn
-    // positions (see UmadP5CelestriadConstants). Only the sector's element changes per run;
-    // the nine positions and each element's three contiguous sub-towers stay intact.
+    // 9 towers 10y out, 40 degrees apart clockwise from north, grouped as 3 contiguous
+    // per-element blocks (not interleaved) starting 20 degrees off north. Only the sector's
+    // element changes per run; the nine positions and each element's three contiguous
+    // sub-towers stay intact.
     public Vector3 TowerPosition(CelestriadElement element, int subIndex)
     {
-        var ringIndex = TowerElementOrder.ToList().IndexOf(element) * 3 + subIndex;
-        var angle = MathF.PI / 9f + ringIndex * (MathF.PI * 2f / 9f);
-        return new Vector3(MathF.Sin(angle) * CelestriadGeometry.RingRadius, 0f, -MathF.Cos(angle) * CelestriadGeometry.RingRadius);
+        var angle = MathF.PI / 9f + RingIndex(element, subIndex) * (MathF.PI * 2f / 9f);
+        return new Vector3(MathF.Sin(angle) * 10f, 0f, -MathF.Cos(angle) * 10f);
     }
+
+    private int RingIndex(CelestriadElement element, int subIndex)
+        => TowerElementOrder.ToList().IndexOf(element) * SubTowersPerElement + subIndex;
 }

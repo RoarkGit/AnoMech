@@ -110,7 +110,9 @@ public sealed class UmadP4KefkaSaysAi(UmadP4KefkaSaysAi.GazeLayout gazeLayout) :
                 return;
             }
             DiagnosticLog.Info($"[AccelerationBombDodge] wiggle firing at t={resolveTime - 0.6f:F2} (resolve at {resolveTime:F2}) from ({member.Position.X:F1},{member.Position.Z:F1}).");
-            member.MoveTo(member.Position + new Vector3(0.3f, 0f, 0f), speed: 0.4f);
+            var toDestination = (member.MoveDestination ?? member.Position) - member.Position;
+            var step = toDestination.Length() > 0.05f ? Vector3.Normalize(toDestination) : Vector3.UnitX;
+            member.MoveTo(member.Position + step * 0.3f, speed: 0.4f);
         });
     }
 
@@ -376,7 +378,7 @@ public sealed class UmadP4KefkaSaysAi(UmadP4KefkaSaysAi.GazeLayout gazeLayout) :
     //
     // Mirrors the hazard geometry the scenario resolves against (see
     // UmadP4KefkaSaysScenario.Run_Kefka_400040E5_1 / Run_Kefka_400040E6_1 and the
-    // shapes in CharacterFind), so "safe here" matches "DamageSolver won't hit me".
+    // shapes in CharacterFind), so "safe here" matches "the hit won't land on me".
 
     // Blizzard: 4 cones, apex at arena centre, facing the 4 inter-cardinals, 45°
     // half-angle. The two with (i + BlizzardOffset) even are real.
@@ -508,16 +510,15 @@ public sealed class UmadP4KefkaSaysAi(UmadP4KefkaSaysAi.GazeLayout gazeLayout) :
     // side, off the centre line.
     //
     // Each side carries one resolved colour (White/Black, always opposite); a player's
-    // wound (White/Black) plus whether the cast is a lie (Wave4True) decides which
-    // colour is lethal. The antilight cleanses iff the player holds BeyondDeathState
-    // AND takes the *opposite* colour to their wound; a matching colour kills them.
-    // So the only players who *can* live in an antilight are the BeyondDeathState
-    // holders, and they must mismatch — everyone else takes the matching (lethal) one.
+    // wound (White/Black) plus whether Wave 3 is a lie (Wave3True) decides which
+    // colour is lethal. A lethal colour kills unless the player holds BeyondDeathStatus,
+    // which it then cleanses.
     //
     // Player debuffs come from Wave3 (scenario applies at 51.67s): position parity →
     // BeyondDeath (even) / AllaganField (odd); Wounds[i] → White / Black wound.
-    // BeyondDeathState = Wave4True ? BeyondDeath : AllaganField, so the "must-cleanse"
-    // parity flips with the lie — that's the "fake cast" dependency.
+    // BeyondDeathStatus = Wave3True ? BeyondDeath : AllaganField. A lie flips both the
+    // must-cleanse parity and the lethal colour, so they cancel and the side each slot
+    // takes doesn't depend on Wave3True.
     private const float AntilightLocalX = 8f; // off the Edge of Death, inside the side rect
     private static IAiMove FloodOfNaught(UmadP4KefkaSaysState state)
     {

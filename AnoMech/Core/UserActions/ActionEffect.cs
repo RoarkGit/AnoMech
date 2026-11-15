@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
 using AnoMech.Core.Game.Party;
+using AnoMech.Core.Native.Implementations;
 using AnoMech.Core.SimObjects;
-using FFXIVClientStructs.FFXIV.Client.Game;
 
 namespace AnoMech.Core.UserActions;
 
@@ -32,8 +32,19 @@ internal sealed unsafe class GaugeEffect(ResourceGauge gauge, int amount) : IAct
     public void Apply(ActionContext ctx)
     {
         if (!ctx.CasterIsPlayer) return;
-        var jgm = JobGaugeManager.Instance();
-        if (jgm != null) gauge.Add(jgm, amount);
+        using var edit = JobGaugeEdit.Begin();
+        if (edit.Gauge != null) gauge.Add(edit.Gauge, amount);
+    }
+}
+
+// Leaf: set a job gauge to an absolute value, clamped like Add.
+internal sealed unsafe class SetGaugeEffect(ResourceGauge gauge, int value) : IActionEffect
+{
+    public void Apply(ActionContext ctx)
+    {
+        if (!ctx.CasterIsPlayer) return;
+        using var edit = JobGaugeEdit.Begin();
+        if (edit.Gauge != null) gauge.Add(edit.Gauge, value - gauge.Read(edit.Gauge));
     }
 }
 
@@ -46,18 +57,21 @@ internal sealed class StatusEffect(ushort statusId, float duration, int stacks =
     {
         ctx.Caster.RemoveStatus(statusId);
         ctx.Caster.AddStatusParam(statusId, stacks, duration);
-        if (ctx.Caster is ISimPartyMember member) HostReport.RoleStatus([member.Role], statusId, duration);
+        if (ctx.Caster is ISimPartyMember member) HostReport.RoleStatus([member.Role], statusId, duration, stacks);
     }
 }
 
 // A peer runs no scenario logic: the host decides who lives, from the statuses on its own copy
-// of each character. Only mitigation is sent, the one kind of status the host acts on.
+// of each character. Only mitigation, the one kind of status the host acts on, and Sprint, which
+// every other client shows, are sent.
 internal static class HostReport
 {
-    public static void RoleStatus(IReadOnlyList<PartyRole> roles, ushort statusId, float duration)
+    public static bool IsReported(ushort statusId) => Mitigation.ByStatusId.ContainsKey(statusId) || statusId == SprintHandler.SprintStatusId;
+
+    public static void RoleStatus(IReadOnlyList<PartyRole> roles, ushort statusId, float duration, int stacks)
     {
-        if (Mitigation.ByStatusId.ContainsKey(statusId))
-            Plugin.MultiplayerInstance?.ReportAppliedRoleStatus(roles, statusId, duration);
+        if (IsReported(statusId))
+            Plugin.Multiplayer?.ReportAppliedRoleStatus(roles, statusId, duration, (ushort)stacks);
     }
 }
 
@@ -73,7 +87,7 @@ internal sealed class TargetStatusEffect(ushort statusId, float duration, int st
             member.AddStatusParam(statusId, stacks, duration);
             if (member is ISimPartyMember slot) roles.Add(slot.Role);
         }
-        HostReport.RoleStatus(roles, statusId, duration);
+        HostReport.RoleStatus(roles, statusId, duration, stacks);
     }
 }
 
@@ -88,7 +102,7 @@ internal sealed class EnemyStatusEffect(ushort statusId, float duration, int sta
             enemy.RemoveStatus(statusId);
             enemy.AddStatusParam(statusId, stacks, duration);
         }
-        Plugin.MultiplayerInstance?.ReportAppliedEnemyStatus(enemies, statusId, duration);
+        Plugin.Multiplayer?.ReportAppliedEnemyStatus(enemies, statusId, duration, (ushort)stacks);
     }
 }
 

@@ -12,20 +12,21 @@ using Dalamud.Interface.Textures.TextureWraps;
 using Dalamud.Interface.Windowing;
 using AnoMech.Core;
 using AnoMech.Core.Game;
+using AnoMech.Core.Native.Interfaces;
 using AnoMech.Core.SimObjects;
 using AnoMech.Scenarios.Top;
 
 namespace AnoMech.Windows;
 
-// DEBUG-only visual debugger for DamageSolver.Resolve. Renders a top-down map of
-// the arena; every Resolve re-runs the SAME CharacterFind.InsideActionAoe query
+// DEBUG-only visual debugger for EnemyActionHandler's AoE queries. Renders a top-down map of
+// the arena; every query re-runs the SAME CharacterFind.InsideActionAoe query
 // against a fixed grid of virtual points (instead of party members) and records
 // the covered cells as one hit instance. Each instance lives FadeSeconds on its
 // OWN timer (re-hitting a cell adds a new instance, it does not refresh an old
 // one), and a cell's brightness reflects how many of its instances are still
 // alive. The user can freeze the image (no paint, no fade).
 //
-// DamageSolver.Resolve reaches us through the static Instance (set in the ctor,
+// EnemyActionHandler reaches us through the static Instance (set in the ctor,
 // constructed only in DEBUG builds from Plugin). The grid and pixel buffers are
 // built lazily on first open so a never-opened window costs nothing.
 internal sealed class DamageDebugWindow : Window, IDisposable
@@ -36,6 +37,10 @@ internal sealed class DamageDebugWindow : Window, IDisposable
     private const float HalfExtent = 25f;   // half-width of mapped region (yalms); > arena so edge AOEs show
     private const float FadeSeconds = 3f;
     private const float HeatCap = 4f;       // max stacked intensity per cell
+
+    // A run where nobody dies but something went wrong needs the same trace as the auto-freeze.
+    private const float PeriodicDumpInterval = 3f;
+    private float periodicDumpTimer;
 
     private readonly Plugin plugin;
 
@@ -76,7 +81,7 @@ internal sealed class DamageDebugWindow : Window, IDisposable
         if (Instance == this) Instance = null;
     }
 
-    // Called from DamageSolver.Resolve with the SAME AoeQuery that drives the real
+    // Called from EnemyActionHandler with the SAME AoeQuery that drives the real
     // party query, so the picture matches the resolved AOE exactly (it's literally
     // re-run against the grid). Runs on the framework thread; `events` is read back in
     // Draw on the same (main) thread.
@@ -157,7 +162,7 @@ internal sealed class DamageDebugWindow : Window, IDisposable
         else
         {
             frozenPositions = null;
-            foreach (var m in plugin.Game.World.Party.AllMembers())
+            foreach (var m in Plugin.Game.World.Party.AllMembers())
                 dl.AddCircleFilled(ToCanvas(m.Position), 3f * uiScale, dot);
         }
 
@@ -176,9 +181,25 @@ internal sealed class DamageDebugWindow : Window, IDisposable
         DumpToFile();
     }
 
+    // Called each frame by Plugin.OnFrameworkUpdate, after Game.Tick.
+    internal void Tick(float deltaSeconds)
+    {
+        // Gated so an idle client doesn't spam empty snapshots into the size-capped log.
+        var game = Plugin.Game;
+        if (game.Paused || (game.ActiveScenario == null && !(Plugin.Multiplayer?.IsRunning ?? false)))
+        {
+            periodicDumpTimer = 0f;
+            return;
+        }
+        periodicDumpTimer += deltaSeconds;
+        if (periodicDumpTimer < PeriodicDumpInterval) return;
+        periodicDumpTimer = 0f;
+        DumpToFile();
+    }
+
     // A party/AOE state snapshot into DiagnosticLog; the last query is re-run against every
     // party member (dead ones included) to show who was inside the shape. Also called
-    // periodically by Game.Tick.
+    // periodically from Tick.
     internal void DumpToFile()
     {
         try
@@ -191,20 +212,20 @@ internal sealed class DamageDebugWindow : Window, IDisposable
             AoeQuery? query = lastRecordedQuery;
             if (query is { } q)
             {
-                var name = ActionLookup.Name(q.ActionId);
+                var name = Natives.Data.ActionName(q.ActionId);
                 var actionSheet = Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.Action>();
                 sb.AppendLine($"Most recent AOE -- Action: {q.ActionId} (0x{q.ActionId:X}) \"{name}\"");
                 if (actionSheet.TryGetRow(q.ActionId, out var action))
                     sb.AppendLine($"  CastType={action.CastType}  EffectRange={action.EffectRange}  XAxisModifier={action.XAxisModifier}");
                 else
                     sb.AppendLine("  (row not found in Action sheet)");
-                sb.AppendLine($"  OmenRotate={q.OmenRotate:F3}  SizeOverride={(q.Size is { } sz ? sz.ToString("F3") : "(none)")}");
+                sb.AppendLine($"  OmenRotate={q.OmenRotate:F3}  SizeOverride={(q.Size is { } sz ? sz.ToString("F3") : "(none)")}  CastTypeOverride={(q.CastTypeOverride is { } ct ? ct.ToString() : "(none)")}");
                 sb.AppendLine();
 
                 var src = q.Source;
                 sb.AppendLine($"Source position: ({src.Position.X:F2}, {src.Position.Y:F2}, {src.Position.Z:F2})  Rotation: {src.Rotation:F3} rad (forward = (sin, cos) of this)");
                 sb.AppendLine();
-                hitFind = new CharacterFind<SimCharacter>(() => plugin.Game.World.Party.AllMembers());
+                hitFind = new CharacterFind<SimCharacter>(() => Plugin.Game.World.Party.AllMembers());
             }
             else
             {
@@ -214,7 +235,7 @@ internal sealed class DamageDebugWindow : Window, IDisposable
 
             var hits = query is { } qq && hitFind is { } hf ? qq.Run(hf) : [];
             sb.AppendLine("Party members at this moment:");
-            foreach (var member in plugin.Game.World.Party.AllMembers())
+            foreach (var member in Plugin.Game.World.Party.AllMembers())
             {
                 var role = (member as ISimPartyMember)?.Role.ToString() ?? member.GetType().Name;
                 var alive = member.IsAlive() ? "ALIVE" : "DEAD ";
@@ -230,15 +251,15 @@ internal sealed class DamageDebugWindow : Window, IDisposable
                 var driver = member switch
                 {
                     SimPlayer => DebugBotControl.Enabled ? "YOU(bot)" : "YOU",
-                    SimNetworkPuppet => "PEER",
+                    SimNetworkPuppet puppet => puppet.BotDriven ? "PEER(bot)" : "PEER",
                     _ => "BOT",
                 };
-                sb.AppendLine($"  {role,-14} [{driver,-8}] {alive}  {hitLabel}  pos=({member.Position.X:F2}, {member.Position.Z:F2}){distLabel}{statusLabel}");
+                sb.AppendLine($"  {role,-14} [{driver,-9}] {alive}  {hitLabel}  pos=({member.Position.X:F2}, {member.Position.Z:F2}){distLabel}{statusLabel}");
             }
             sb.AppendLine();
 
             sb.AppendLine("Enemies currently in world:");
-            var enemies = plugin.Game.World.Children.OfType<SimEnemy>().Where(e => e.IsActive).ToList();
+            var enemies = Plugin.Game.World.Children.OfType<SimEnemy>().Where(e => e.IsActive).ToList();
             if (enemies.Count == 0)
                 sb.AppendLine("  (none)");
             else
@@ -247,7 +268,7 @@ internal sealed class DamageDebugWindow : Window, IDisposable
             sb.AppendLine();
 
             sb.AppendLine("Tethers currently active:");
-            var tethers = plugin.Game.World.Children.OfType<SimTether>().Where(t => t.IsActive).ToList();
+            var tethers = Plugin.Game.World.Children.OfType<SimTether>().Where(t => t.IsActive).ToList();
             if (tethers.Count == 0)
                 sb.AppendLine("  (none)");
             else
@@ -269,7 +290,7 @@ internal sealed class DamageDebugWindow : Window, IDisposable
     }
 
     // Cleared at the start of each run so a new scenario records from a blank, live map.
-    internal void ResetFreeze() { frozen = false; freezeRebuildPending = false; Clear(); }
+    internal void ResetFreeze() { frozen = false; freezeRebuildPending = false; periodicDumpTimer = 0f; Clear(); }
 
     // Labels a tether endpoint as its party role if it's a party member, else its
     // enemy display name -- tethers can end on either.
@@ -281,7 +302,7 @@ internal sealed class DamageDebugWindow : Window, IDisposable
     private List<Vector3> CapturePartyPositions()
     {
         var list = new List<Vector3>();
-        foreach (var m in plugin.Game.World.Party.AllMembers())
+        foreach (var m in Plugin.Game.World.Party.AllMembers())
             list.Add(m.Position);
         return list;
     }

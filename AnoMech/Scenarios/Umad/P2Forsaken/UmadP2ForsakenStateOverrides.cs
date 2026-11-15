@@ -9,9 +9,13 @@ namespace AnoMech.Scenarios.Umad.P2Forsaken;
 // See TopP5DeltaStateOverrides for the canonical shape.
 public sealed class UmadP2ForsakenStateOverrides
 {
-    public EndAttack? FirstEndAttack { get; set; }     // null = Auto/randomize (debug-only UI)
+    public EndAttack?[] EndAttacks { get; } = new EndAttack?[4]; // null = Auto/randomize; [0] has debug-only UI
     public Direction? NewNorth { get; set; }           // null = random direction (debug-only UI)
     public uint? SupportLockon { get; set; }           // null = random; else LockonId.ForsakenChariot / .ForsakenCone
     public PartyRole? SupportStackRole { get; set; }   // null = random support gets Stack
     public PartyRole? DpsStackRole { get; set; }       // null = random dps gets Stack
+    public int? Rotation { get; set; }                 // null = random; else +1 / -1 eighths per tower
+    // [round * 2] the tower toward GetTowers' first direction, [round * 2 + 1] the second; null = from
+    // the round's four shuffled; else that tower's two new lockons, dealt to its soakers in PartyRole order.
+    public uint[]?[] TowerLockons { get; } = new uint[]?[UmadP2ForsakenState.TowerRounds * 2];
 }

@@ -24,9 +24,9 @@ public sealed class UcobP4AddsAi : IScenarioAi<UcobP4AddsState>
     private static readonly Vector2 AddsStackSpot = new(13.2f, -7.1f);
     private static readonly Vector2 AlongWallFromAdds = Vector2.Normalize(new Vector2(-AddsStackSpot.Y, AddsStackSpot.X));
     private static readonly Vector2 TwintaniaTankSpot =
-        AddsStackSpot + AlongWallFromAdds * (Geometry.TwintaniaHitboxRadius + TankHitboxRadius);
+        AddsStackSpot + AlongWallFromAdds * (UcobConstants.Geometry.TwintaniaHitboxRadius + TankHitboxRadius);
     private static readonly Vector2 NaelTankPlummetSpot =
-        AddsStackSpot - AlongWallFromAdds * (Geometry.NaelHitboxRadius + TankHitboxRadius);
+        AddsStackSpot - AlongWallFromAdds * (UcobConstants.Geometry.NaelHitboxRadius + TankHitboxRadius);
     private const float TankPairGap = 1f;
     private static readonly Vector2 NaelTankSpot =
         TwintaniaTankSpot - Vector2.Normalize(AddsStackSpot) * TankPairGap;
@@ -85,14 +85,17 @@ public sealed class UcobP4AddsAi : IScenarioAi<UcobP4AddsState>
         ai.Move(28.68f, () => RangedBaitsLiquidHell(5), jitter: 0f);
         ai.Move(30.3f, () => HatchPositions(0), jitter: 0.2f);
         ai.Move(36.76f, () => SwapNeurolinksAroundTwisters(0, 0), jitter: 0f);
+        ai.Move(37.3f, () => SwapNeurolinksAroundTwisters(0, 0), jitter: 0f);
 
         ai.Move(41.45f, () => AnswerQuote(0, 0));
+        ai.Move(43.6f, () => AnswerFirstMoveAgainOnceTwistersExpire(0), sprint: true);
         ai.Move(45.45f, () => AnswerQuote(0, 1), jitter: QuoteJitter, sprint: true);
         ai.Move(48.55f, () => AnswerQuote(0, 2), jitter: QuoteJitter, sprint: true);
         ai.Move(51.9f, Uptime);
 
         ai.Move(53.91f, () => SidestepTwisters(1), jitter: 0f);
         ai.Move(58.7f, Uptime);
+        ai.Move(60.8f, UptimeOnceTwistersExpire);
         ai.Move(78.1f, TanksTakeTheirAdds);
 
         ai.Move(83.9f, () => RangedBaitsLiquidHell(0));
@@ -103,8 +106,10 @@ public sealed class UcobP4AddsAi : IScenarioAi<UcobP4AddsState>
         ai.Move(91.26f, () => RangedBaitsLiquidHell(5), jitter: 0f);
         ai.Move(92.9f, () => HatchPositions(1), jitter: 0.2f);
         ai.Move(99.39f, () => SwapNeurolinksAroundTwisters(1, 2), jitter: 0f);
+        ai.Move(99.95f, () => SwapNeurolinksAroundTwisters(1, 2), jitter: 0f);
 
         ai.Move(104.05f, () => AnswerQuote(1, 0));
+        ai.Move(106.2f, () => AnswerFirstMoveAgainOnceTwistersExpire(1), sprint: true);
         ai.Move(108.03f, () => AnswerQuote(1, 1), jitter: QuoteJitter, sprint: true);
         ai.Move(111.13f, () => AnswerQuote(1, 2), jitter: QuoteJitter, sprint: true);
         ai.Move(114.5f, Uptime);
@@ -128,6 +133,8 @@ public sealed class UcobP4AddsAi : IScenarioAi<UcobP4AddsState>
         spots[(int)PartyRole.OffTank] = TankSpot(PartyRole.OffTank);
         return Go(spots);
     }
+
+    private IAiMove UptimeOnceTwistersExpire() => Uptime();
 
     private IAiMove UptimeWithNaelTankOutOfPlummet()
     {
@@ -207,11 +214,25 @@ public sealed class UcobP4AddsAi : IScenarioAi<UcobP4AddsState>
     {
         var hatch = state.Hatches[hatchSet];
         var spots = SidestepSpots(twisterSet);
+        var waitingForHatch = new HashSet<int>();
         foreach (var role in hatch.Targets)
-            if (hatch.NeurolinkFor(role) is { } link)
-                spots[(int)role] = link == 1 ? NeurolinkCenter(link) : ExitNeurolink(link);
-        return Go(spots);
+        {
+            if (hatch.NeurolinkFor(role) is not { } link) continue;
+            if (link == 1)
+                spots[(int)role] = NeurolinkCenter(link);
+            else if (AlreadyHatched(role))
+                spots[(int)role] = ExitNeurolink(link);
+            else
+            {
+                spots[(int)role] = NeurolinkCenter(link);
+                waitingForHatch.Add((int)role);
+            }
+        }
+        return Go(spots, waitingForHatch);
     }
+
+    private bool AlreadyHatched(PartyRole role) =>
+        world.Party.Get(role) is { } member && member.HasStatus(UcobConstants.StatusId.ManaHypersensitivity);
 
     private static Vector2 NeurolinkCenter(int link) => Flat(Geometry.Neurolinks[link]);
 
@@ -264,6 +285,8 @@ public sealed class UcobP4AddsAi : IScenarioAi<UcobP4AddsState>
 
     private static Vector2 TowardArenaCenter(Vector2 here) =>
         here.LengthSquared() < 1f ? new Vector2(1f, 0f) : Vector2.Normalize(-here);
+
+    private IAiMove AnswerFirstMoveAgainOnceTwistersExpire(int quote) => AnswerQuote(quote, 0);
 
     private IAiMove AnswerQuote(int quote, int step)
     {
@@ -334,10 +357,11 @@ public sealed class UcobP4AddsAi : IScenarioAi<UcobP4AddsState>
         return offset.Length() <= LooseStackRadius ? here : PartyStack + Vector2.Normalize(offset) * LooseStackRadius;
     }
 
-    private IAiMove Go(Vector2?[] spots)
+    private IAiMove Go(Vector2?[] spots, IReadOnlySet<int>? stayingOnTheirTwister = null)
     {
         for (var slot = 0; slot < spots.Length; slot++)
         {
+            if (stayingOnTheirTwister?.Contains(slot) == true) continue;
             if (spots[slot] is { } spot)
                 spots[slot] = ClearOfLiveTwisters(spot);
             else if (StandingByLiveTwister(slot) is { } here)

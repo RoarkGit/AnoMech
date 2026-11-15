@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using AnoMech.Core.Native.Implementations;
 using AnoMech.Core.SimObjects;
 using FFXIVClientStructs.FFXIV.Client.Game;
 
@@ -31,29 +32,6 @@ internal unsafe class ResourceGauge
 // StatusClearedOnAction table removes statuses by action. See reference-resource-generation.
 internal static unsafe class JobActions
 {
-    // ClassJob RowIds.
-    private const uint Gnb = 37;
-    private const uint War = 21;
-    private const uint Drk = 32;
-    private const uint Drg = 22;
-    private const uint Nin = 30;
-    private const uint Rpr = 39;
-    private const uint Sam = 34;
-    private const uint Mch = 31;
-    private const uint Rdm = 35;
-    private const uint Sch = 28;
-    private const uint Vpr = 41;
-    private const uint Whm = 24;
-    private const uint Dnc = 38;
-    private const uint Pld = 19;
-    private const uint Mnk = 20;
-    private const uint Brd = 23;
-    private const uint Blm = 25;
-    private const uint Smn = 27;
-    private const uint Ast = 33;
-    private const uint Pct = 42;
-    private const uint Sge = 40;
-
     private static readonly ResourceGauge GnbCartridge = new()
     {
         Read = jgm => jgm->Gunbreaker.Ammo,
@@ -254,16 +232,17 @@ internal static unsafe class JobActions
     private static readonly ResourceGauge PctPalette = new() { Read = jgm => jgm->Pictomancer.PalleteGauge, Write = (jgm, v) => jgm->Pictomancer.PalleteGauge = (byte)v, Max = 100 };
     private static readonly ResourceGauge PctPaint = new() { Read = jgm => jgm->Pictomancer.Paint, Write = (jgm, v) => jgm->Pictomancer.Paint = (byte)v, Max = 5 };
     private static readonly ResourceGauge BlmPolyglot = new() { Read = jgm => jgm->BlackMage.PolyglotStacks, Write = (jgm, v) => jgm->BlackMage.PolyglotStacks = (byte)v, Max = 3 };
+    private static readonly ResourceGauge PldOath = new() { Read = jgm => jgm->Paladin.OathGauge, Write = (jgm, v) => jgm->Paladin.OathGauge = (byte)v, Max = 100 };
 
     // Gauges with time-based behavior, ticked by TimedGaugeHandler.
     public static readonly TimedGauge[] TimedGauges =
     [
-        new(Whm, WhmLily, 20f, decay: false, writeTimer: (jgm, v) => jgm->WhiteMage.LilyTimer = (short)v),        // Healing Lily: +1 every 20s
-        new(Sge, SgeAddersgall, 20f, decay: false, writeTimer: (jgm, v) => jgm->Sage.AddersgallTimer = (short)v), // Addersgall: +1 every 20s
-        new(Gnb, GnbComboStep, 30f, decay: true),    // Gnashing Fang combo: resets to 0 after 30s (no visual timer field)
-        new(Pld, PldConfiteorStep, 30f, decay: true), // Confiteor route: safety reset if abandoned mid-combo
-        new(Drk, DrkDeliriumStep, 30f, decay: true),  // Scarlet Delirium route: safety reset if abandoned mid-combo
-        new(Blm, BlmPolyglot, 30f, decay: false),     // Polyglot: +1/30s (real gen needs active Enochian; approximated as always-on in-sim)
+        new(JobId.WhiteMage, WhmLily, 20f, decay: false, writeTimer: (jgm, v) => jgm->WhiteMage.LilyTimer = (short)v),        // Healing Lily: +1 every 20s
+        new(JobId.Sage, SgeAddersgall, 20f, decay: false, writeTimer: (jgm, v) => jgm->Sage.AddersgallTimer = (short)v), // Addersgall: +1 every 20s
+        new(JobId.Gunbreaker, GnbComboStep, 30f, decay: true),    // Gnashing Fang combo: resets to 0 after 30s (no visual timer field)
+        new(JobId.Paladin, PldConfiteorStep, 30f, decay: true), // Confiteor route: safety reset if abandoned mid-combo
+        new(JobId.DarkKnight, DrkDeliriumStep, 30f, decay: true),  // Scarlet Delirium route: safety reset if abandoned mid-combo
+        new(JobId.BlackMage, BlmPolyglot, 30f, decay: false),     // Polyglot: +1/30s (real gen needs active Enochian; approximated as always-on in-sim)
     ];
 
     private static readonly Dictionary<uint, IActionEffect[]> Actions = new()
@@ -369,9 +348,11 @@ internal static unsafe class JobActions
         [36957] = [Gauge(NinNinki, 40), Status(3850, 30f)], // Dokumori (+ Higi)
         [2264]  = [Status(497, 15f)],                     // Kassatsu
         [7403]  = [Status(1186, 6f), Status(3851, 30f)],  // Ten Chi Jin + Tenri Jindo Ready
-        [2267]  = [Status(2690, 30f, 3)],                 // Raiton → Raiju Ready (3 stk)
         [16493] = [Status(1954, 30f, 5), Status(2723, 45f)], // Bunshin (5 stk) + Phantom Kamaitachi Ready
+        [2269]  = [Status(3848, 20f)],                    // Huton → Shadow Walker
         [2271]  = [Status(3848, 20f)],                    // Suiton → Shadow Walker
+        [18879] = [Status(3848, 20f)],                    // Huton (Ten Chi Jin) → Shadow Walker
+        [18881] = [Status(3848, 20f)],                    // Suiton (Ten Chi Jin) → Shadow Walker
 
         // RPR
         [24373] = [Gauge(RprSoul, 10)],          // Slice
@@ -455,6 +436,7 @@ internal static unsafe class JobActions
         [7521]  = [Status(1971, 30f), Status(3875, 30f, 3), Status(3878, 30f)], // Manafication → range + Magicked Swordplay (3 stk) + Prefulgence Ready
         // Enchanted melee each grant 1 Mana Stack (at 3, Verthunder/Veraero → Verflare/Verholy):
         [7527] = [Gauge(RdmManaStacks, 1)], [7528] = [Gauge(RdmManaStacks, 1)], [7529] = [Gauge(RdmManaStacks, 1)], // Enchanted Riposte/Zwerchhau/Redoublement
+        [45960] = [Gauge(RdmManaStacks, 1)], [45961] = [Gauge(RdmManaStacks, 1)], [45962] = [Gauge(RdmManaStacks, 1)], // the same under Manafication
         [7530] = [Gauge(RdmManaStacks, 1)], [37002] = [Gauge(RdmManaStacks, 1)], [37003] = [Gauge(RdmManaStacks, 1)], // Enchanted Moulinet/Deux/Trois
         // TODO: unbalanced mana
 
@@ -610,9 +592,18 @@ internal static unsafe class JobActions
         [24309] = [Gauge(SgeAddersgall, 1)],              // Rhizomata → +1 Addersgall (passive fill in TimedGauges)
     };
 
-    // Every action with a row, harvested into the multiplayer asset allowlist (SimAssets) so a
-    // peer will play a bot's use of one.
-    public static readonly IReadOnlyCollection<uint> JobActionIds = Actions.Keys;
+    // What one landed auto-attack swing does, per job.
+    private static readonly Dictionary<JobId, IActionEffect[]> AutoAttacks = new()
+    {
+        [JobId.Paladin] = [Gauge(PldOath, 5)],   // Oath Mastery
+    };
+
+    // The resources the player holds when a scenario starts. Phases start mid-fight, so the
+    // server-built resources a player would walk in with are seeded here.
+    private static readonly Dictionary<JobId, IActionEffect[]> StartingResources = new()
+    {
+        [JobId.Paladin] = [SetGauge(PldOath, 100)],
+    };
 
     // status → predicates that clear it. OR-semantics: any match removes the status. The
     // dispatcher runs this BEFORE the action's effects, so a line action re-grants after
@@ -642,7 +633,7 @@ internal static unsafe class JobActions
         // MNK
         [2513] = [AnyWeaponskill()], [3843] = [ActionId(36950)], [3842] = [ActionId(36949)], [3841] = [ActionId(36944)],
         // NIN
-        [3851] = [ActionId(36961)], [2690] = [AnyWeaponskill()], [2689] = [ActionId(7402), ActionId(36960)],
+        [3851] = [ActionId(36961)], [2690] = [ActionId(25777), ActionId(25778)], [2689] = [ActionId(7402), ActionId(36960)],
         [2723] = [ActionId(25774)], [3850] = [ActionId(36959), ActionId(36960)], [3848] = [ActionId(36958), ActionId(2258), ActionId(16489)],
         // SAM
         [1236] = [ActionId(7486)], [2959] = [ActionId(25781)], [3855] = [ActionId(36964)], [3856] = [ActionId(36966), ActionId(36965)],
@@ -698,14 +689,29 @@ internal static unsafe class JobActions
         // stack-decrement / any-GCD consumers (rely on the AddStatus(-1) consume above):
         [1368] = [ActionId(7384), ActionId(16458), ActionId(16459), ActionId(25748), ActionId(25749), ActionId(25750)], // Requiescat: empowered casts / Blades
         [1954] = [AnyWeaponskill()],   // Bunshin: one stack per weaponskill
-        [3875] = [ActionId(7527), ActionId(7528), ActionId(7529), ActionId(7530), ActionId(37002), ActionId(37003)],  // Magicked Swordplay: enchanted melee
+        [3875] = [ActionId(7527), ActionId(7528), ActionId(7529), ActionId(45960), ActionId(45961), ActionId(45962), ActionId(7530), ActionId(37002), ActionId(37003)],  // Magicked Swordplay: enchanted melee
         [110]  = [AnyWeaponskill()],   // Perfect Balance: one stack per weaponskill
         [3688] = [AnyGcd()],           // Hyperphantasia: one stack per pictomancy GCD
     };
 
+    public static bool Knows(uint actionId) => Actions.ContainsKey(actionId);
+
     public static void ApplyEffects(SimCharacter caster, uint actionId, ulong targetId, System.Random rng)
     {
         if (!Actions.TryGetValue(actionId, out var effects)) return;
+        var ctx = new ActionContext(actionId, targetId, caster, rng);
+        foreach (var effect in effects) effect.Apply(ctx);
+    }
+
+    public static void ApplyAutoAttack(SimCharacter caster, uint actionId, ulong targetId, System.Random rng)
+        => ApplyJobEffects(AutoAttacks, caster, actionId, targetId, rng);
+
+    public static void ApplyStartingResources(SimCharacter caster, System.Random rng)
+        => ApplyJobEffects(StartingResources, caster, 0, 0, rng);
+
+    private static void ApplyJobEffects(Dictionary<JobId, IActionEffect[]> table, SimCharacter caster, uint actionId, ulong targetId, System.Random rng)
+    {
+        if (!table.TryGetValue(PlayerJob.Current, out var effects)) return;
         var ctx = new ActionContext(actionId, targetId, caster, rng);
         foreach (var effect in effects) effect.Apply(ctx);
     }
@@ -728,17 +734,18 @@ internal static unsafe class JobActions
     // the job that owns each scalar gauge is listed; the other job's same-cost-type spender no-ops.
     // Non-scalar costs (SAM Sen 40, MNK nadi 79, PCT canvas 94, SMN attunement 71 bitfield) and
     // non-gauge costs (MP/GP/CP, status/HP, AST cards) are intentionally absent → left alone.
-    private static readonly Dictionary<(uint Job, uint CostType), ResourceGauge[]> CostGauges = new()
+    private static readonly Dictionary<(JobId Job, uint CostType), ResourceGauge[]> CostGauges = new()
     {
-        [(War, 22u)] = [WarBeast], [(Drk, 25u)] = [DrkBlood], [(Nin, 27u)] = [NinNinki], [(Mnk, 28u)] = [MnkChakra],
-        [(Sch, 30u)] = [SchAetherflow], [(Sam, 39u)] = [SamKenki], [(Rdm, 43u)] = [RdmWhite, RdmBlack],  // RDM: N of each colour
-        [(Dnc, 53u)] = [DncFeathers], [(Dnc, 54u)] = [DncEsprit], [(Gnb, 55u)] = [GnbCartridge],
-        [(Whm, 56u)] = [WhmBloodLily], [(Whm, 57u)] = [WhmLily], [(Brd, 59u)] = [BrdSoulVoice],
-        [(Mch, 61u)] = [MchHeat], [(Mch, 62u)] = [MchBattery], [(Sam, 63u)] = [SamMeditation],
-        [(Rpr, 64u)] = [RprSoul], [(Rpr, 65u)] = [RprShroud], [(Rpr, 66u)] = [RprLemureShroud], [(Rpr, 67u)] = [RprVoidShroud],
-        [(Sge, 68u)] = [SgeAddersgall], [(Sge, 69u)] = [SgeAddersting], [(Drg, 75u)] = [DrgFocus],
-        [(Vpr, 87u)] = [VprRattlingCoil], [(Vpr, 88u)] = [VprSerpentOffering], [(Vpr, 89u)] = [VprAnguineTribute], [(Vpr, 90u)] = [VprAnguineTribute], [(Pct, 91u)] = [PctPalette],
-        [(Blm, 23u)] = [BlmPolyglot],   // Foul / Xenoglossy spend 1 Polyglot
+        [(JobId.Warrior, 22u)] = [WarBeast], [(JobId.DarkKnight, 25u)] = [DrkBlood], [(JobId.Ninja, 27u)] = [NinNinki], [(JobId.Monk, 28u)] = [MnkChakra],
+        [(JobId.Scholar, 30u)] = [SchAetherflow], [(JobId.Samurai, 39u)] = [SamKenki], [(JobId.RedMage, 43u)] = [RdmWhite, RdmBlack],  // RDM: N of each colour
+        [(JobId.Dancer, 53u)] = [DncFeathers], [(JobId.Dancer, 54u)] = [DncEsprit], [(JobId.Gunbreaker, 55u)] = [GnbCartridge],
+        [(JobId.WhiteMage, 56u)] = [WhmBloodLily], [(JobId.WhiteMage, 57u)] = [WhmLily], [(JobId.Bard, 59u)] = [BrdSoulVoice],
+        [(JobId.Machinist, 61u)] = [MchHeat], [(JobId.Machinist, 62u)] = [MchBattery], [(JobId.Samurai, 63u)] = [SamMeditation],
+        [(JobId.Reaper, 64u)] = [RprSoul], [(JobId.Reaper, 65u)] = [RprShroud], [(JobId.Reaper, 66u)] = [RprLemureShroud], [(JobId.Reaper, 67u)] = [RprVoidShroud],
+        [(JobId.Sage, 68u)] = [SgeAddersgall], [(JobId.Sage, 69u)] = [SgeAddersting], [(JobId.Dragoon, 75u)] = [DrgFocus],
+        [(JobId.Viper, 87u)] = [VprRattlingCoil], [(JobId.Viper, 88u)] = [VprSerpentOffering], [(JobId.Viper, 89u)] = [VprAnguineTribute], [(JobId.Viper, 90u)] = [VprAnguineTribute], [(JobId.Pictomancer, 91u)] = [PctPalette],
+        [(JobId.BlackMage, 23u)] = [BlmPolyglot],   // Foul / Xenoglossy spend 1 Polyglot
+        [(JobId.Paladin, 41u)] = [PldOath],         // Sheltron / Holy Sheltron / Intervention / Cover
     };
 
     // Generic spender pass: subtract an action's gauge cost, read straight from the sheet.
@@ -746,16 +753,16 @@ internal static unsafe class JobActions
     {
         var sheet = Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.Action>();
         if (!sheet.TryGetRow(actionId, out var row)) return;
-        var job = Plugin.PlayerState.ClassJob.RowId;
-        if (!CostGauges.TryGetValue((job, (uint)row.PrimaryCostType), out var gauges)) return;
+        if (!CostGauges.TryGetValue((PlayerJob.Current, (uint)row.PrimaryCostType), out var gauges)) return;
         int amount = row.PrimaryCostValue;
         if (amount <= 0) return;
-        var jgm = JobGaugeManager.Instance();
-        if (jgm == null) return;
-        foreach (var gauge in gauges) gauge.Add(jgm, -amount);
+        using var edit = JobGaugeEdit.Begin();
+        if (edit.Gauge == null) return;
+        foreach (var gauge in gauges) gauge.Add(edit.Gauge, -amount);
     }
 
     private static IActionEffect Gauge(ResourceGauge gauge, int amount) => new GaugeEffect(gauge, amount);
+    private static IActionEffect SetGauge(ResourceGauge gauge, int value) => new SetGaugeEffect(gauge, value);
     private static IActionEffect Status(ushort statusId, float duration, int stacks = 0) => new StatusEffect(statusId, duration, stacks);
     private static IActionEffect TargetStatus(ushort statusId, float duration, int stacks = 0) => new TargetStatusEffect(statusId, duration, stacks);
     private static IActionEffect EnemyStatus(ushort statusId, float duration, int stacks = 0) => new EnemyStatusEffect(statusId, duration, stacks);

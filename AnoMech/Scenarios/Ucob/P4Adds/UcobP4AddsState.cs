@@ -1,5 +1,7 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Numerics;
 using AnoMech.Core.Game.Party;
 using AnoMech.Core.SimObjects;
 
@@ -100,7 +102,7 @@ public sealed class UcobP4AddsState
     public SimEnemy? Nael { get; set; }
     public PartyRole TwintaniaTank { get; private set; } = PartyRole.MainTank;
     public PartyRole NaelTank { get; private set; } = PartyRole.OffTank;
-    public event System.Action? TankAssignmentsChanged;
+    public event Action? TankAssignmentsChanged;
 
     public void AssignTanks(PartyRole twintaniaTank, PartyRole naelTank)
     {
@@ -109,17 +111,12 @@ public sealed class UcobP4AddsState
         NaelTank = naelTank;
         TankAssignmentsChanged?.Invoke();
     }
-    public SimCharacter? LiquidHellTarget { get; set; }
-    public List<System.Numerics.Vector3> LiveTwisters { get; } = new();
-    public List<(PartyRole Role, System.Numerics.Vector3 Position)>[] TwisterSnapshots { get; } =
-        [new(), new(), new(), new()];
-    public SimCharacter? RavensbeakTarget { get; set; }
-    public SimCharacter? DeathSentenceTarget { get; set; }
 
-    public UcobP4AddsState(UcobP4AddsStateOverrides overrides)
+    public List<Vector3> LiveTwisters { get; } = new();
+    public List<(PartyRole Role, Vector3 Position)>[] TwisterSnapshots { get; } = [new(), new(), new(), new()];
+
+    public UcobP4AddsState(Rng rng, SimParty party, UcobP4AddsStateOverrides overrides)
     {
-        var rng = new Rng();
-
         var first = overrides.FirstQuote ?? rng.NextObj(NaelQuote.All.ToArray());
         var second = overrides.SecondQuote ?? rng.NextObj(first.FollowUps.ToArray());
         Quotes = [first, second];
@@ -132,7 +129,7 @@ public sealed class UcobP4AddsState
         ];
 
         TwisterTargets = Enumerable.Range(0, 4)
-            .Select(_ => (IReadOnlyList<PartyRole>)RoleList.Random(SimParty.Empty, TwistersPerSet).List)
+            .Select(_ => (IReadOnlyList<PartyRole>)RoleList.Random(rng, party, TwistersPerSet).List)
             .ToList();
 
         BeamTargets = [rng.NextRole(), rng.NextRole()];

@@ -6,8 +6,8 @@ namespace AnoMech.Core.UserActions;
 // Applies a player action's client-side effects from the JobActions table: first clears
 // any statuses the action ends (StatusClearedOnAction), then applies its effects — gauge
 // writes and status grants, gated by Combo(...) / Random(...) wrappers. Replaces the old
-// resource-generation and Continuation handlers. MUST run before ComboHandler: combo-gated
-// effects read the PRE-advance combo state, which ComboHandler mutates.
+// resource-generation and Continuation handlers. MUST run before ActionEffectHandler: combo-gated
+// effects read the PRE-advance combo state, which ActionEffectHandler advances.
 internal sealed class JobActionHandler : IUserActionHandler
 {
     private readonly Random rng = new();
@@ -15,7 +15,7 @@ internal sealed class JobActionHandler : IUserActionHandler
     public void OnAction(ActionType actionType, uint actionId, ulong targetId)
     {
         if (actionType != ActionType.Action) return;
-        var player = Plugin.GameInstance?.Player;
+        var player = Plugin.Game?.Player;
         if (player == null) return;
 
         // Clear first so a line action can re-grant after its own weaponskill clear.

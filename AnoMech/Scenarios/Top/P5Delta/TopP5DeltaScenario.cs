@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using AnoMech.Core;
+using AnoMech.Core.EnemyActions;
 using AnoMech.Core.Game;
 using AnoMech.Core.Game.Ai;
 using AnoMech.Core.Game.Party;
@@ -10,6 +11,7 @@ using AnoMech.Core.Map;
 using AnoMech.Core.SimObjects;
 using AnoMech.Multiplayer;
 using static AnoMech.Scenarios.Top.TopConstants;
+using Actions = AnoMech.Scenarios.Top.TopActions;
 
 namespace AnoMech.Scenarios.Top.P5Delta;
 
@@ -27,15 +29,13 @@ public sealed class TopP5DeltaScenario : IMultiplayerReplayable
 
     public IReadOnlyList<IScenarioAi> AiStrats => [new TopP5DeltaAi()];
 
-    private TopUtils topUtils = null!;
 
     private TopP5DeltaState state = null!;
     private SimWorld world = null!;
     private SimParty party = null!;
-    private readonly Random rng = new();
 
     // Exposed so MultiplayerManager can broadcast the AI-relevant subset after a host Start --
-    // see UmadP3BlackHoleScenario.LastState. BeyondDefenseTarget resolves later (t=35.3s);
+    // see UmadP3BlackHoleScenario.LastState. BeyondDefenseTarget resolves later (t=35.7s);
     // LastState aliasing `state` is what lets BuildMidRunUpdateMessage pick that change up.
     public TopP5DeltaState? LastState { get; private set; }
 
@@ -47,101 +47,104 @@ public sealed class TopP5DeltaScenario : IMultiplayerReplayable
     private SimEnemy? finalHelper;
     private SimEnemy? opticalUnit;
     private List<SimEnemy?>? rocketPunches;
+    private List<Vector3>? punchSpots;
     private List<SimEnemy?>? armUnits;
-    private List<SimTether> tethersShort = [];
-    private List<SimTether> tethersLong = [];
-    private Vector3? pilePitchPosition;
-    private TopUtils.HelloWorldSolver? nearSolver;
-    private TopUtils.HelloWorldSolver? farSolver;
+    private HelloWorld? nearSolver;
+    private HelloWorld? farSolver;
+    private HelloWorldFailures helloWorldFailures = null!;
 
     public void Run(SimWorld worldParam, int? selectedAi)
     {
         world = worldParam;
         party = worldParam.Party;
-        state = new TopP5DeltaState(settingsWindow.Overrides, party.PlayerRole);
+        state = new TopP5DeltaState(world.Rng, settingsWindow.Overrides, party.PlayerRole);
         LastState = state;
+        lastBroadcastBeyondDefenseTarget = null;
+        helloWorldFailures = new HelloWorldFailures(world, () => omega);
         if (selectedAi is { } idx && idx < AiStrats.Count)
             ((IScenarioAi<TopP5DeltaState>)AiStrats[idx]).Run(state, world);
-        topUtils = new TopUtils(world);
 
         world.Events.Add(0.1f, SpawnOmega);
-        world.Events.Add(2f, () => omega?.Cast(ActionId.RunMiDeltaVersion));
+        world.Events.Add(2f, () => omega?.Cast(Actions.RunMiDeltaVersion));
+        world.Events.Add(2.1f, SpawnDeltaAdds);
         // Delta arena transition animation (index 0x07) — real game fires these
         // at +8/+24/+27/+42s relative to the Run: mi cast. Cast is at t=2f here.
         world.Events.Add(10f, EyeSpawn);
         world.Events.Add(26.1f, EyeStartCharging);
-        world.Events.Add(29f, EyeDoneCharging);
-        world.Events.Add(44f, EyeDespawn);
-        world.Events.Add(10f, () => omega?.PlayActionTimeline(TimelineId.WarpOut));
+        world.Events.Add(28.8f, EyeDoneCharging);
+        world.Events.Add(43.8f, EyeDespawn);
+        world.Events.Add(10f, () => omega?.PlayActionTimeline(ActionTimelineId.WarpStart));
         world.Events.Add(10.1f, ApplyDeltaTethers);           // HW debuffs confirmed at t=10.053s
-        world.Events.Add(10.1f, SpawnDeltaAdds);
+        world.Events.Add(10.1f, SpawnOpticalUnit);
+        world.Events.Add(10.2f, RevealDeltaAdds);
         world.Events.Add(10f, () => omega?.SetTargetable(false));
-        world.Events.Add(17.3f, SpawnRocketPunches); // Peripheral Synthesis fires t=17.31s
+        world.Events.Add(17.3f, () => beetle?.Cast(ActionId.PeripheralSynthesis));
+        world.Events.Add(18.25f, SpawnRocketPunches);
+        world.Events.Add(19.05f, () => rocketPunches?.ForEach(punch => punch?.ActorControl.PopIn()));
         world.Events.Add(20.3f, () =>finalHelper?.Cast(ActionId.ArchivePeripheral));
         world.Events.Add(23.5f, SpawnArmUnits);               // Archive Peripheral fires t=20.30s
         world.Events.Add(25.3f, MarkArmUnitRotations);        // +1s after arm spawn
-        world.Events.Add(28.4f, () => omega?.PlayActionTimeline(TimelineId.Spawn));
+        world.Events.Add(25.5f, () => armUnits?.ForEach(unit => unit?.SetVisibleInEnemyList(true)));
         world.Events.Add(28.1f, ApplyDeltaRealTethers); // same window as optical laser
-        world.Events.Add(29.5f, () => topUtils.ResolveOpticalLaser(opticalUnit));
+        world.Events.Add(28.2f, OmegaFaceSouth);
+        world.Events.Add(28.9f, () => opticalUnit?.Cast(Actions.OpticalLaser));
+        world.Events.Add(28.4f, () => omega?.PlayActionTimeline(ActionTimelineId.WarpEnd));
         world.Events.Add(30.5f, StartMonitors);         // BeyondDefense + OWC casts start t=30.43/30.47s
-        world.Events.Add(30.1f, StartPunchExplosions);  // 3s visual cast, resolves at 33.5f
-        world.Events.Add(33.5f, ResolvePunchExplosions);
-        world.Events.Add(35.3f, FireBeyondDefenseAoe);        // BeyondDefense jump t=35.336s
-        world.Events.Add(35.6f, StartHyperPulse);             // HyperPulse cast starts t=35.559s
-        world.Events.Add(35.7f, ResolveBeyondDefenseAoe);     // BeyondDefense AOE lands t=35.649s
-        world.Events.Add(35.2f, DespawnRocketPunches);
-        world.Events.Add(38.1f, ResolveHyperPulseFirst);      // HyperPulse fires t=38.060s
+        world.Events.Add(30.1f, StartPunchExplosions);  // 3s cast, resolves at 33.5f
+        world.Events.Add(33.9f, SlideFistsOntoTheirSpots);
+        world.Events.Add(35.7f, FireBeyondDefenseAoe);
+        world.Events.Add(35.6f, StartHyperPulse);             // HyperPulse cast starts t=35.559s, fires t=38.060s
+        world.Events.Add(35.2f, FadeOutRocketPunches);
         world.Events.Add(38.6f, NextHyperPulse);              // rotation steps ~0.58s each
         world.Events.Add(39.2f, NextHyperPulse);
         world.Events.Add(39.8f, NextHyperPulse);
         world.Events.Add(40.4f, NextHyperPulse);
-        world.Events.Add(40.5f, ResolveMonitors);             // OWC AOE fires t=40.509s
+        world.Events.Add(40.5f, FireMonitors);                // OWC AOE fires t=40.509s
         world.Events.Add(41.0f, NextHyperPulse);              // last HP step, same tick as pile pitch t=40.999s
         world.Events.Add(41.0f, FirePilePitch);               // Pile Pitch fires t=40.999s
-        world.Events.Add(41.1f, ResolvePilePitch);
-        world.Events.Add(44.5f, () => armUnits?.ForEach(unit => unit?.PlayActionTimeline(TimelineId.WarpOut)));
-        world.Events.Add(45.5f, () => armUnits?.ForEach(unit => unit?.Despawn()));
+        world.Events.Add(41.5f, () => armUnits?.ForEach(unit => unit?.SetVisibleInEnemyList(false)));
+        world.Events.Add(41.6f, () => armUnits?.Select((unit, i) => (unit, i)).ToList().ForEach(t => t.unit?.PlayActionTimeline(state.ArmHandedness[t.i].ArmUnitWarpStartTimelineId)));
+        world.Events.Add(43.6f, () => armUnits?.ForEach(unit => unit?.Despawn()));
         world.Events.Add(43.5f, StartSwivelCannon);           // Swivel Cannon cast starts t=43.458s
-        world.Events.Add(44.1f, () => omega?.PlayActionTimeline(TimelineId.WarpOut));
-        world.Events.Add(43.5f, () => finalHelper?.PlayActionTimeline(TimelineId.WarpOut));
+        world.Events.Add(44.1f, () => omega?.PlayActionTimeline(ActionTimelineId.WarpStart));
+        world.Events.Add(43.5f, () => finalHelper?.PlayActionTimeline(ActionTimelineId.WarpStart));
         world.Events.Add(45.5f, () => finalHelper?.Despawn());  // despawn signal t=43.591s
-        world.Events.Add(47.5f, () => CheckTethersExpired(tethersShort));             // tethers applied t=30.2, 18s life → expire 48.2
-        world.Events.Add(53.2f, ResolveSwivelCannon);         // 43.458 + 9.7s cast = t=53.158s
-        world.Events.Add(53.2f, () => DropHelloPuddle(state.NearWorldRole, true));
-        world.Events.Add(53.2f, () => DropHelloPuddle(state.FarWorldRole, false));
-        world.Events.Add(54.2f, () => omega?.PlayActionTimeline(TimelineId.Spawn));
-        world.Events.Add(54.2f, () => HopHelloPuddle(true));
-        world.Events.Add(54.2f, () => HopHelloPuddle(false));
+        world.Events.Add(54f, OmegaFaceNorth);
+        world.Events.Add(54.1f, () => DropHelloPuddle(state.NearWorldRole, true));
+        world.Events.Add(54.1f, () => DropHelloPuddle(state.FarWorldRole, false));
+        world.Events.Add(54.2f, () => omega?.PlayActionTimeline(ActionTimelineId.WarpEnd));
         world.Events.Add(55.2f, () => HopHelloPuddle(true));
         world.Events.Add(55.2f, () => HopHelloPuddle(false));
-        world.Events.Add(56.6f, () => beetle?.PlayActionTimeline(TimelineId.WarpOut));
+        world.Events.Add(56.1f, () => HopHelloPuddle(true));
+        world.Events.Add(56.1f, () => HopHelloPuddle(false));
+        world.Events.Add(56.6f, () => beetle?.PlayActionTimeline(ActionTimelineId.WarpStart));
         world.Events.Add(58.6f, () => beetle?.Despawn());
-        world.Events.Add(56.5f, () => omega?.SetTargetable(true));
-        world.Events.Add(65.1f, () => CheckTethersExpired(tethersLong));             // tethers expire t=30.2+36=66.2
+        world.Events.Add(58.2f, () => omega?.SetTargetable(true));
+        // Keeps the run open past the long tethers' expiry (66.2); the session ends once Events runs dry.
+        world.Events.Add(67f, () => { });
     }
     
+    public void OnTetherEnded(TetherEnded ended) => ResolveHwTether(ended);
+    public void OnActionResolved(ActionResolved resolved) => helloWorldFailures.OnActionResolved(resolved);
+    public void OnStatusLost(StatusLost lost) => helloWorldFailures.OnStatusLost(lost);
+    public void OnStatusAdded(StatusAdded added) => helloWorldFailures.OnStatusAdded(added);
+
     public void Tick(float delta, float elapsed)
     {
-        TickTethers(tethersLong, tether => tether.StretchLt(Geometry.HwTetherBreakDistance));
-        TickTethers(tethersShort, tether => tether.StretchGt(Geometry.HwTetherBreakDistance));
-        topUtils.CheckHelloWorldDeath();
     }
 
-
-    private void TickTethers(List<SimTether> tethers, Predicate<SimTether> breakCondition)
+    // UNVERIFIED for Expired: no pull lets a tether run out; every fail follows a holder's death.
+    // A prep tether runs out into its real one, so only a death fails it.
+    private void ResolveHwTether(TetherEnded ended)
     {
-        var dead = tethers.Where(SimTether.IsAnyDead).ToList();
-        dead.ForEach(OnTetherFailed);
-        dead.ForEach(tether => tethers.Remove(tether));
-               
-        
-        var broken = tethers.Where(breakCondition.Invoke).ToList();
-        broken.ForEach(OnTetherBroken);
-        broken.ForEach(tether =>
+        var tetherId = ended.Tether.TetherId;
+        if (tetherId is TetherId.HWPrepRemote or TetherId.HWPrepLocal)
         {
-            var a= tethers.Remove(tether);
-            Plugin.Log.Info($"Removed {a} tether");
-        });
+            if (ended.Reason == TetherEndReason.EndDied) ExplodeHwTether(ended.Tether, Actions.HwTetherFail);
+            return;
+        }
+        if (tetherId is not (TetherId.HWRemote or TetherId.HWLocal)) return;
+        ExplodeHwTether(ended.Tether, ended.Reason == TetherEndReason.Stretched ? Actions.HwTetherBreak : Actions.HwTetherFail);
     }
 
 
@@ -153,6 +156,7 @@ public sealed class TopP5DeltaScenario : IMultiplayerReplayable
             Level: 90,
             Targetable: true,
             InitialModeAttributeFlags: 0x10,
+            LayoutId: BNpcLayoutId.OmegaMDynamis,
             Placement: new Placement(Vector3.Zero, MathF.PI)));
     }
 
@@ -163,26 +167,38 @@ public sealed class TopP5DeltaScenario : IMultiplayerReplayable
             NameId: BNpcNameId.OmegaBeetle,
             Level: 90,
             Targetable: false,
-            EnemyList: EnemyListMode.Always,
+            EnemyList: EnemyListMode.OnlyWhenVisible,
+            Visibility: SpawnVisibility.HiddenUntilShown,
+            LayoutId: BNpcLayoutId.BeetleHelper,
             Placement: new Placement(new Vector3(-20f, 0f, 0f) * state.EyeSpawn.Mul, MathF.PI / 2f * state.EyeSpawn.Mul)));
-        beetle?.PlayActionTimeline(TimelineId.Spawn);
-
-        opticalUnit = world.SpawnEnemy(new EnemySpawnConfig(
-            BNpcBaseId: BNpcBaseId.OpticalUnit,
-            NameId: BNpcNameId.OpticalUnit,
-            Level: 90,
-            Targetable: false,
-            EnemyList: EnemyListMode.Never,
-            Placement: new Placement(new Vector3(0f, 0f, -45f) * state.EyeSpawn.Mul, MathF.PI / 2f - MathF.PI / 2 * state.EyeSpawn.Mul)));
 
         finalHelper = world.SpawnEnemy(new EnemySpawnConfig(
             BNpcBaseId: BNpcBaseId.FinalHelper,
             NameId: BNpcNameId.OmegaFinal,
             Level: 90,
             Targetable: false,
-            EnemyList: EnemyListMode.Always,
+            EnemyList: EnemyListMode.OnlyWhenVisible,
+            Visibility: SpawnVisibility.HiddenUntilShown,
+            LayoutId: BNpcLayoutId.FinalHelper,
             Placement: new Placement(new Vector3(20f, 0f, 0f) * state.EyeSpawn.Mul, -MathF.PI / 2f * state.EyeSpawn.Mul)));
-        finalHelper?.PlayActionTimeline(TimelineId.Spawn);
+    }
+
+    private void RevealDeltaAdds()
+    {
+        beetle?.PlayActionTimeline(ActionTimelineId.WarpEnd);
+        finalHelper?.PlayActionTimeline(ActionTimelineId.WarpEnd);
+    }
+
+    private void SpawnOpticalUnit()
+    {
+        opticalUnit = world.SpawnEnemy(new EnemySpawnConfig(
+            BNpcBaseId: BNpcBaseId.OpticalUnit,
+            NameId: BNpcNameId.OpticalUnit,
+            Level: 90,
+            Targetable: false,
+            EnemyList: EnemyListMode.Never,
+            LayoutId: BNpcLayoutId.OpticalUnit,
+            Placement: new Placement(new Vector3(0f, 0f, -45f) * state.EyeSpawn.Mul, MathF.PI / 2f - MathF.PI / 2 * state.EyeSpawn.Mul)));
     }
 
     private void ApplyDeltaTethers()
@@ -201,7 +217,6 @@ public sealed class TopP5DeltaScenario : IMultiplayerReplayable
 
     private void SpawnRocketPunches()
     {
-        beetle?.Cast(ActionId.PeripheralSynthesis);
         rocketPunches = Enumerable.Range(0, 8).Select(i =>
         {
             var placement = party.Get(state.TetherOrder[i])!.Placement().MoveForward(-Geometry.PunchBackDistance);
@@ -210,18 +225,16 @@ public sealed class TopP5DeltaScenario : IMultiplayerReplayable
                                              NameId: BNpcNameId.RocketPunch,
                                              Level: 90,
                                              Targetable: false,
+                                             Visibility: SpawnVisibility.HiddenUntilPopIn,
                                              EnemyList: EnemyListMode.Always,
+                                             LayoutId: state.FistColors[i] == BNpcBaseId.RocketPunchYellow ? BNpcLayoutId.RocketPunchYellow : BNpcLayoutId.RocketPunchBlue,
                                              Placement: placement));
-            punch?.AddVfx(VfxPath.RocketPunchSpawn, persistent: false);
             return punch;
         }).ToList();
     }
 
     private void SpawnArmUnits()
     {
-        omega?.SetModeAttributeFlags(0x31);
-        omega?.SetModelState(0x04);
-        
         armUnits = Enumerable.Range(0, 6).Select(i =>
         {
             var unit = world.SpawnEnemy(new EnemySpawnConfig(
@@ -229,9 +242,10 @@ public sealed class TopP5DeltaScenario : IMultiplayerReplayable
                 NameId: state.ArmHandedness[i].ArmUnitNameId,
                 Level: 90,
                 Targetable: false,
-                EnemyList: EnemyListMode.Always,
+                EnemyList: EnemyListMode.Manual,
+                LayoutId: state.ArmHandedness[i].ArmUnitLayoutId,
                 Placement: new Placement(Geometry.ArmUnitPlacements[i].Position * new Vector3(state.EyeSpawn.Mul, 1, 1), Geometry.ArmUnitPlacements[i].Rotation)));
-            unit?.PlayActionTimeline(TimelineId.Spawn);
+            unit?.PlayActionTimeline(state.ArmHandedness[i].ArmUnitWarpEndTimelineId);
             return unit;
         }).ToList();
     }
@@ -240,8 +254,7 @@ public sealed class TopP5DeltaScenario : IMultiplayerReplayable
     {
         armUnits?.Select((unit, i) => (unit, i))
             .ToList()
-            .ForEach(t => t.unit?.AttachLockonVfx(state.ArmHandedness[t.i].RotateLockonId, persistent: false));
-            // .ForEach(t => t.unit?.AttachLockonVfx(state.ArmHandedness[t.i].RotateLockonId, duration: 8f));
+            .ForEach(t => t.unit?.AttachLockonVfx(state.ArmRotations[t.i].LockonId));
     }
 
     private void ApplyDeltaRealTethers()
@@ -249,63 +262,23 @@ public sealed class TopP5DeltaScenario : IMultiplayerReplayable
         var targets = new SimCharacter[8];
         for (int i = 0; i < 8; i++) targets[i] = party.Get(state.TetherOrder[i])!;
 
-        tethersShort =
-        [
-            world.Tether(targets[0], targets[1], TetherId.HWRemote, 18f, StatusId.HWRemoteTether),
-            world.Tether(targets[2], targets[3], TetherId.HWRemote, 18f, StatusId.HWRemoteTether)
-        ];
-        tethersLong =
-        [
-            world.Tether(targets[4], targets[5], TetherId.HWLocal,  36f, StatusId.HWLocalTether),
-            world.Tether(targets[6], targets[7], TetherId.HWLocal,  36f, StatusId.HWLocalTether)
-        ];
+        world.Tether(targets[0], targets[1], TetherId.HWRemote, 18f, StatusId.HWRemoteTether)
+            .BreaksWhen(t => t.StretchGt(Geometry.HwTetherBreakDistance));
+        world.Tether(targets[2], targets[3], TetherId.HWRemote, 18f, StatusId.HWRemoteTether)
+            .BreaksWhen(t => t.StretchGt(Geometry.HwTetherBreakDistance));
+        world.Tether(targets[4], targets[5], TetherId.HWLocal,  36f, StatusId.HWLocalTether)
+            .BreaksWhen(t => t.StretchLt(Geometry.HwTetherBreakDistance));
+        world.Tether(targets[6], targets[7], TetherId.HWLocal,  36f, StatusId.HWLocalTether)
+            .BreaksWhen(t => t.StretchLt(Geometry.HwTetherBreakDistance));
     }
 
-    private void OnTetherBroken(SimTether tether)
+    private void ExplodeHwTether(SimTether tether, EnemyAction explosion)
     {
-        if (tether.Resolved) return;
-        if (tether.A is not { } a || tether.B is not { } b) return;
-        Plugin.Log.Info($"Tether broken {tether.TetherId}");
-        tether.Resolved = true;
-        SpawnHwTetherHelper(a.Position, ActionId.HwTetherBreak);
-        SpawnHwTetherHelper(b.Position, ActionId.HwTetherBreak);
         tether.Despawn();
-    }
-
-    private void OnTetherFailed(SimTether tether)
-    {
-        if (tether.Resolved) return;
         if (tether.A is not { } a || tether.B is not { } b) return;
-        Plugin.Log.Info($"Tether failed {tether.TetherId}");
-        tether.Resolved = true;
-        party.WipeAllPlayers("HW Tether Fail (raidwide wipe)");
-        SpawnHwTetherHelper(a.Position, ActionId.HwTetherFail);
-        SpawnHwTetherHelper(b.Position, ActionId.HwTetherFail);
-        tether.Despawn();
+        omega?.CastFromHelper(explosion, at: new Placement(a.Position, 0f));
+        omega?.CastFromHelper(explosion, at: new Placement(b.Position, 0f));
     }
-
-    private void SpawnHwTetherHelper(Vector3 pos, uint actionId)
-    {
-        var helper = world.SpawnEnemy(new EnemySpawnConfig(
-            BNpcBaseId: BNpcBaseId.OmegaHelper,
-            Targetable: false,
-            EnemyList: EnemyListMode.Never,
-            Placement: new Placement(pos, 0f)));
-        if (helper != null) world.Events.Add(Duration.MonitorHelperLifetime, helper.Despawn);
-        helper?.Cast(actionId);
-        party
-             .ActiveMembers()
-             .ToList()
-             .ForEach(ApplyHwTetherBreakHit);
-    }
-
-    private void ApplyHwTetherBreakHit(SimCharacter player)
-    {
-        if (IsDamageLethal(player, magic: true, comeRuin: 3)) { player.Die("HW Tether Break"); return; }
-        player.AddStatus(StatusId.TriceComeRuin, Duration.HwTetherBreakStack);
-        player.AddStatus(StatusId.MagicVulnerabilityUpMini, Duration.HwTetherBreakStack);
-    }
-
 
     private void StartMonitors()
     {
@@ -321,40 +294,21 @@ public sealed class TopP5DeltaScenario : IMultiplayerReplayable
     private void StartPunchExplosions()
     {
         if (rocketPunches is null) return;
-        state.PunchTargets = Enumerable.Range(0, 8)
-                                       .Select(i => party.Get(state.TetherOrder[i])!.Position)
-                                       .ToList();
+        var punchTargets = Enumerable.Range(0, 8)
+                                     .Select(i => party.Get(state.TetherOrder[i])!.Position)
+                                     .ToList();
+        punchSpots = punchTargets;
         for(var i = 0; i < 8; i++)
         {
             var punch = rocketPunches[i];
             if (punch is null) continue;
             var targets = Enumerable.Range(0, 8)
                                     .Where(k => k != i)
-                                    .Select(k => new RocketPunchTarget(state.PunchTargets[k], 0f, state.FistColors[k]))
+                                    .Select(k => new RocketPunchTarget(punchTargets[k], 0f, state.FistColors[k]))
                                     .ToList();
-            var inRange = punch.Find(targets).InsideCircle(state.PunchTargets[i], Geometry.RocketPunchAoeRadius);
+            var inRange = punch.Find(targets).InsideCircle(punchTargets[i], Geometry.RocketPunchAoeRadius);
             bool failed = inRange.Count != 1 || inRange[0].FistColor == state.FistColors[i];
-            if (failed) state.PunchExplosionUnmitigated = true;
-            punch.Cast(failed ? ActionId.DeltaUnmitigatedExplosion : ActionId.DeltaExplosion, state.PunchTargets[i]);
-        }
-    }
-
-    private void ResolvePunchExplosions()
-    {
-        if (state.PunchTargets is null) return;
-        state.PunchTargets
-             .SelectMany(target => party.Find.InsideCircle(target, Geometry.RocketPunchAoeRadius))
-             .ToList()
-             .ForEach(hit =>
-             {
-                 Plugin.Log.Info($"Hit: {(hit as ISimPartyMember)?.Role} by Rocket Punch AOE (lethal)");
-                 hit.Die("Rocket Punch AOE");
-             });
-        state.PunchTargets = null;
-        if (state.PunchExplosionUnmitigated)
-        {
-            Plugin.Log.Info("Hit: ALL PARTY by Rocket Punch — unmitigated explosion (lethal raidwide)");
-            party.WipeAllPlayers("Rocket Punch — unmitigated explosion");
+            punch.Cast(failed ? Actions.DeltaUnmitigatedExplosion : Actions.DeltaExplosion, punchTargets[i]);
         }
     }
 
@@ -371,38 +325,14 @@ public sealed class TopP5DeltaScenario : IMultiplayerReplayable
             // Someone within range has to eat it, so a refusal only counts while anyone else can.
             var allowed = closest2.Where(m => !refused.Contains(m)).ToList();
             if (allowed.Count == 0) allowed = closest2.ToList();
-            target = allowed.Count > 0 ? allowed[Random.Shared.Next(allowed.Count)] : null;
+            target = allowed.Count > 0 ? allowed[world.Rng.Next(allowed.Count)] : null;
         }
         else
-            target = party.Find.RandomClosestN(omega.Position, 2);
+            target = party.Find.RandomClosestN(world.Rng, omega.Position, 2);
         if (target is null) return;
         state.BeyondDefenseTarget = ((ISimPartyMember)target).Role;
         Plugin.Log.Info($"Beyond defense target {((ISimPartyMember)target).Role}");
-        omega.Cast(
-            ActionId.BeyondDefenseAOE,
-            targetLocation: target.Position,
-            targetId: target.GameObjectId);
-    }
-
-    private void ResolveBeyondDefenseAoe()
-    {
-        if (state.BeyondDefenseTarget is not { } beyondDefenseTarget) return;
-        var mainTarget = party.Get(beyondDefenseTarget);
-        if (mainTarget is null) return;
-
-        foreach (var hit in party.Find.InsideCircle(mainTarget.Position, Geometry.BeyondDefenseAoeRadius))
-            if (hit != mainTarget)
-            {
-                Plugin.Log.Info($"Hit: {(hit as ISimPartyMember)?.Role} by Beyond Defense AOE (lethal)");
-                hit.Die("Beyond Defense AOE");
-            }
-
-        var mainLethal = IsDamageLethal(mainTarget, magic: false, comeRuin: 2);
-        Plugin.Log.Info($"Hit: {(mainTarget as ISimPartyMember)?.Role} by Beyond Defense ({(mainLethal ? "lethal" : "non-lethal")})");
-        if (mainLethal)
-            mainTarget.Die("Beyond Defense");
-        else
-            mainTarget.AddStatus(StatusId.TwiceComeRuin, 6.96f);
+        omega.Cast(Actions.BeyondDefense, target);
     }
 
     private void StartHyperPulse()
@@ -414,21 +344,24 @@ public sealed class TopP5DeltaScenario : IMultiplayerReplayable
             {
                 if (party.Find.Closest(unit.Position) is { } target)
                     unit.Face(target.Position);
-                unit.Cast(ActionId.HyperPulseDeltaCharging);
+                unit.Cast(Actions.HyperPulseCharging);
             });
     }
 
-    private void DespawnRocketPunches()
+    private void SlideFistsOntoTheirSpots()
     {
-        rocketPunches?.ForEach(punch => punch?.Despawn());
-        rocketPunches = null;
+        if (rocketPunches is null || punchSpots is null) return;
+        for (var i = 0; i < rocketPunches.Count; i++)
+        {
+            if (rocketPunches[i] is not { } punch) continue;
+            punch.MoveTo(punchSpots[i], Vector3.Distance(punch.Position, punchSpots[i]), punch.Rotation);
+        }
     }
 
-    private void ResolveHyperPulseFirst()
+    private void FadeOutRocketPunches()
     {
-        if (armUnits is null) return;
-        foreach (var arm in armUnits)
-            if (arm is { IsActive: true }) ResolveHyperPulseRect(arm);
+        rocketPunches?.ForEach(punch => punch?.FadeOut());
+        rocketPunches = null;
     }
 
     private void NextHyperPulse()
@@ -438,178 +371,66 @@ public sealed class TopP5DeltaScenario : IMultiplayerReplayable
             .ToList()
             .ForEach(t =>
             {
-                var step = state.ArmHandedness[t.i].Mul * Geometry.HyperPulseStep;
+                var step = state.ArmRotations[t.i].Mul * Geometry.HyperPulseStep;
                 t.unit!.SetPosition(new Placement(t.unit.Position, t.unit.Rotation + step));
-                t.unit.Cast(ActionId.HyperPulseDeltaShoot);
-                ResolveHyperPulseRect(t.unit);
+                t.unit.Cast(Actions.HyperPulseShoot);
             });
     }
 
-    private void ResolveHyperPulseRect(SimEnemy arm)
+    // Every target is picked before the first circle lands, so a death can't change the later picks.
+    private void FireMonitors()
     {
-        foreach (var hit in party.Find.InsideRect(arm.Placement(), Geometry.HyperPulseHalfWidth, Geometry.HyperPulseLength))
-        {
-            Plugin.Log.Info($"Hit: {(hit as ISimPartyMember)?.Role} by Delta Hyper Pulse (lethal)");
-            hit.Die("Delta Hyper Pulse");
-        }
-    }
-
-    private void ResolveMonitors()
-    {
-        var aoePositions = new List<Vector3>();
-
+        var targets = new List<SimCharacter>();
         if (finalHelper is {} helper)
-            foreach (var m in FireMonitorOnSide(helper.Placement(), state.OmegaMonitorSide, exclude: null))
-                aoePositions.Add(m.Position);
+            targets.AddRange(MonitorTargets(helper.Placement(), state.OmegaMonitorSide, exclude: null));
 
         var playerMonitor = party.Get(state.TetherOrder[state.PlayerMonitorIndex])!;
-        foreach (var m in FireMonitorOnSide(playerMonitor.Placement(), state.PlayerMonitorSide, exclude: playerMonitor))
-            aoePositions.Add(m.Position);
+        targets.AddRange(MonitorTargets(playerMonitor.Placement(), state.PlayerMonitorSide, exclude: playerMonitor));
         playerMonitor.RemoveStatus(state.PlayerMonitorSide.MonitorDebuffId);
 
-        var hit = new HashSet<SimCharacter>();
-        foreach (var pos in aoePositions)
-            foreach (var member in party.Find.InsideCircle(pos, Geometry.OversampledWaveCannonAoeRadius))
-                hit.Add(member);
-
-        foreach (var member in hit)
-        {
-            if (!member.IsActive) continue;
-            var lethal = IsDamageLethal(member, magic: true, comeRuin: 2);
-            Plugin.Log.Info($"Hit: {(member as ISimPartyMember)?.Role} by Oversampled Wave Cannon ({(lethal ? "lethal" : "non-lethal")})");
-            if (lethal)
-                member.Die("Oversampled Wave Cannon");
-            else
-            {
-                member.AddStatus(StatusId.MagicVulnerabilityUp, 4.96f);
-                member.AddStatus(StatusId.TwiceComeRuin, 6.96f);
-            }
-        }
+        foreach (var member in targets.Take(4))
+            finalHelper?.CastFromHelper(Actions.OversampledWaveCannon, member, at: new Placement(member.Position, 0f));
     }
 
-    private IReadOnlyList<SimCharacter> FireMonitorOnSide(Placement src, Side side, SimCharacter? exclude = null)
-    {
-        var targets = party.Find.OnSideN(src, side.Mul, count: 2, exclude: exclude);
-        foreach (var member in targets)
-        {
-            var pos = member.Position;
-            var spawned = world.SpawnEnemy(new EnemySpawnConfig(
-                BNpcBaseId: BNpcBaseId.OmegaHelper,
-                Targetable: false,
-                EnemyList: EnemyListMode.Never,
-                Placement: new Placement(pos, 0f)));
-            if (spawned != null) world.Events.Add(Duration.MonitorHelperLifetime, spawned.Despawn);
-            spawned?.Cast(ActionId.OversampledWaveCannonAoe, targetLocation: pos, targetId: member.GameObjectId);
-        }
-        return targets;
-    }
+    private IReadOnlyList<SimCharacter> MonitorTargets(Placement src, Side side, SimCharacter? exclude)
+        => party.Find.OnSideN(world.Rng, src, side.Mul, count: 2, exclude: exclude);
 
     private void FirePilePitch()
     {
         if (omega is null) return;
         if (party.Find.Closest(omega.Position) is not { } target) return;
-        pilePitchPosition = target.Position;
-        omega.Cast(
-            ActionId.PilePitch,
-            targetLocation: target.Position,
-            targetId: target.GameObjectId);
-    }
-
-    private void ResolvePilePitch()
-    {
-        if (pilePitchPosition is null) return;
-        var pos = pilePitchPosition.Value;
-        pilePitchPosition = null;
-
-        var inAoe = party.Find.InsideCircle(pos, Geometry.PilePitchAoeRadius);
-        if (inAoe.Count < 3)
-        {
-            foreach (var hit in inAoe)
-            {
-                Plugin.Log.Info($"Hit: {(hit as ISimPartyMember)?.Role} by Pile Pitch — too few players (lethal)");
-                hit.Die("Pile Pitch (too few players)");
-            }
-            return;
-        }
-
-        foreach (var hit in inAoe)
-        {
-            if (!hit.IsActive) continue;
-            var lethal = IsDamageLethal(hit, magic: true, comeRuin: 2);
-            Plugin.Log.Info($"Hit: {(hit as ISimPartyMember)?.Role} by Pile Pitch ({(lethal ? "lethal" : "non-lethal")})");
-            if (lethal)
-                hit.Die("Pile Pitch");
-            else
-                hit.AddStatus(StatusId.TwiceComeRuin, 6.96f);
-        }
+        omega.Cast(Actions.PilePitch, target);
     }
 
     private void StartSwivelCannon()
+        => beetle?.Cast(state.SwivelCannonSide == Side.Left ? Actions.SwivelCannonLeft : Actions.SwivelCannonRight);
+
+    private void OmegaFaceSouth()
     {
-        beetle?.Cast(
-            state.SwivelCannonSide.SwivelCannonActionId,
-            omenDelay: 8.5f,
-            omenRotate: state.SwivelCannonSide.Mul * MathF.PI / 2);
+        omega?.SetModeAttributeFlags(0x31);
+        omega?.SetModelState(0x04);
+        omega?.SetRotation(0f);
     }
 
-    private void ResolveSwivelCannon()
+    private void OmegaFaceNorth()
     {
         omega?.SetModeAttributeFlags(0x32);
         omega?.SetModelState(0x00);
-        if (beetle is null) return;
-        var rotation = beetle.Rotation + state.SwivelCannonSide.Mul * MathF.PI / 2;
-        var placement = new Placement(beetle.Position, rotation);
-        foreach (var hit in party.Find.InsideCone(placement, Geometry.SwivelCannonHalfAngle, Geometry.SwivelCannonRange))
-        {
-            Plugin.Log.Info($"Hit: {(hit as ISimPartyMember)?.Role} by Swivel Cannon (lethal)");
-            hit.Die("Swivel Cannon");
-        }
-    }
-
-    private void CheckTethersExpired(List<SimTether> tethers)
-    {
-        foreach (var t in tethers)
-            if (!t.Resolved) OnTetherFailed(t);
+        omega?.SetRotation(MathF.PI);
     }
 
     private void DropHelloPuddle(PartyRole role, bool near)
     {
         if (near)
-            nearSolver = topUtils.HelloWorld(role, true);
+            nearSolver = helloWorldFailures.Chain(role, true);
         else
-            farSolver = topUtils.HelloWorld(role, false);
+            farSolver = helloWorldFailures.Chain(role, false);
         HopHelloPuddle(near);
     }
 
     private void HopHelloPuddle(bool near)
     {
-        var solver = near ? nearSolver : farSolver;
-        if ( solver?.Position is not {} position) return;
-        var helper = world.SpawnEnemy(new EnemySpawnConfig(
-                                          BNpcBaseId: BNpcBaseId.OmegaHelper,
-                                          Targetable: false,
-                                          EnemyList: EnemyListMode.Never,
-                                          Placement: new Placement(position, 0f)));
-        if (helper != null) world.Events.Add(Duration.MonitorHelperLifetime, helper.Despawn);
-        solver.CastSpell(helper);
-    }
-
-
-    private bool IsDamageLethal(SimCharacter character, bool magic, int comeRuin)
-    {
-        var who = (character as ISimPartyMember)?.Role.ToString() ?? character.GetType().Name;
-        var ruinWeight = comeRuin switch { 2 => 0.6f, 3 => 0.4f, _ => 0f };
-        var twiceRuin = character.HasStatus(StatusId.TwiceComeRuin);
-        if (twiceRuin) ruinWeight += 0.6f;
-        var triceStacks = character.FindStatus(StatusId.TriceComeRuin)?.Stacks ?? 0;
-        ruinWeight += triceStacks * 0.4f;
-        var ruinLethal = ruinWeight > 1;
-        var magicVuln1 = character.HasStatus(StatusId.MagicVulnerabilityUp);
-        var magicVuln2Stacks = character.FindStatus(StatusId.MagicVulnerabilityUpMini)?.Stacks ?? 0;
-        var magicLethal = magic && (magicVuln1 || magicVuln2Stacks > 1);
-        var lethal = ruinLethal || magicLethal;
-        Plugin.Log.Info($"IsDamageLethal: {who} magic={magic} comeRuin={comeRuin} → {lethal} [ruinWeight={ruinWeight:F2} TwiceComeRuin={twiceRuin} TriceComeRuin={triceStacks} MagicVulnerabilityUp={magicVuln1} MagicVulnUp2={magicVuln2Stacks}]");
-        return lethal;
+        (near ? nearSolver : farSolver)?.CastSpell(omega);
     }
 
     // Delta arena transition animation (index 0x07).
@@ -624,7 +445,7 @@ public sealed class TopP5DeltaScenario : IMultiplayerReplayable
             s.TetherOrder.ToArray(), s.FistColors.ToArray(), s.PlayerMonitorIndex,
             s.PlayerMonitorSide == Side.Left, s.OmegaMonitorSide == Side.Left,
             s.EyeSpawn == NorthSouth.North, s.SwivelCannonSide == Side.Left,
-            s.ArmHandedness.Select(side => side == Side.Left).ToArray(),
+            s.ArmRotations.Select(rotation => rotation == ArmRotation.Clockwise).ToArray(),
             s.FarWorldRole, s.NearWorldRole, s.FarWorldTetherIndex)
         : null;
 
@@ -632,11 +453,11 @@ public sealed class TopP5DeltaScenario : IMultiplayerReplayable
     {
         if (message is not TopP5DeltaAiReplayStateMessage msg) return null;
         // BeyondDefenseTarget starts null here, guaranteed set by ApplyMidRunUpdate before the
-        // Ai reads it (t=35.3s < 36.2s).
+        // Ai reads it (t=35.7s < 36.2s).
         var shadowState = TopP5DeltaState.FromNetworkReplay(
             msg.TetherOrder, msg.FistColors, msg.PlayerMonitorIndex,
             msg.PlayerMonitorSideIsLeft, msg.OmegaMonitorSideIsLeft, msg.EyeSpawnIsNorth,
-            msg.SwivelCannonSideIsLeft, msg.ArmHandednessIsLeft, msg.FarWorldRole,
+            msg.SwivelCannonSideIsLeft, msg.ArmRotatesClockwise, msg.FarWorldRole,
             msg.NearWorldRole, msg.FarWorldTetherIndex);
         ((IScenarioAi<TopP5DeltaState>)AiStrats[aiIndex]).Run(shadowState, replayWorld);
         return shadowState;

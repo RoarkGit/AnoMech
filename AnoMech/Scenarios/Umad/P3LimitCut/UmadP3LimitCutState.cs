@@ -1,11 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Numerics;
 using AnoMech.Core;
 using AnoMech.Core.Game.Party;
 using AnoMech.Core.SimObjects;
 using AnoMech.Scenarios.Umad.P3BlackHole;
-using static AnoMech.Scenarios.Umad.P3LimitCut.UmadP3LimitCutConstants;
 
 namespace AnoMech.Scenarios.Umad.P3LimitCut;
 
@@ -19,12 +19,12 @@ public sealed class UmadP3LimitCutScenarioObjects
 }
 
 // Per-run randomization: any start spot, either direction, the charges walking the circle the
-// other way from the same start, the numbers a plain permutation, the boss spot the party's
-// choice. Headwind/Tailwind splits 4/4, 5/3, 3/5 or 2/6 rather than a coin per player, which
+// other way from the same start, the numbers a plain permutation, the wind crystal (and so the
+// boss spot) any intercardinal. Headwind/Tailwind splits 4/4, 5/3, 3/5 or 2/6 rather than a coin per player, which
 // would reach 6/2 far too often.
 public sealed class UmadP3LimitCutState
 {
-    private readonly Rng rng = new();
+    private readonly Rng rng = Rng.Detached;
 
     public UmadP3LimitCutScenarioObjects Objects { get; } = new();
     public int StartSpot { get; }
@@ -45,7 +45,14 @@ public sealed class UmadP3LimitCutState
     // Opposite its clone's charge spot (the charge falls off with distance; straight across is
     // 38y), half a step along the charge walk so as not to stand where the clone four numbers
     // later charges from (every clean pull: -23 deg CW, +22 deg CCW).
-    public float SafeHeading(int k) => Geometry.SpotHeading(ChargeSpot(k)) + MathF.PI - PlacementStep * (MathF.PI / 8f);
+    public float SafeHeading(int k) => SpotHeading(ChargeSpot(k)) + MathF.PI - PlacementStep * (MathF.PI / 8f);
+
+    // The cardinals and intercardinals at 20y. Spot 0..7 -> heading 0 = S, 2 = E, 4 = N, 6 = W.
+    public static float SpotHeading(int spot) => spot * (MathF.PI / 4f);
+    public static Vector3 SpotPosition(int spot) => OnCircle(SpotHeading(spot), 20f);
+    public static string SpotName(int spot) => SpotNames[Mod8(spot)];
+    public static Vector3 OnCircle(float heading, float radius) => new(MathF.Sin(heading) * radius, 0f, MathF.Cos(heading) * radius);
+    private static readonly string[] SpotNames = ["S", "SE", "E", "NE", "N", "NW", "W", "SW"];
 
     public int NumberOf(PartyRole role)
     {
@@ -57,8 +64,9 @@ public sealed class UmadP3LimitCutState
     // The run's own dice, for the one choice made mid-run: who a dead number's clone charges.
     public T PickRandom<T>(T[] values) => rng.NextObj(values);
 
-    public UmadP3LimitCutState(SimParty party, UmadP3LimitCutStateOverrides overrides)
+    public UmadP3LimitCutState(Rng rng, SimParty party, UmadP3LimitCutStateOverrides overrides)
     {
+        this.rng = rng;
         StartSpot = overrides.StartSpot ?? rng.NextInt(8);
         Clockwise = overrides.Clockwise ?? rng.NextBool();
         BossSpot = overrides.BossSpot ?? rng.NextObj(1, 3, 5, 7);

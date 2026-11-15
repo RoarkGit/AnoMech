@@ -22,23 +22,20 @@ public sealed record ExaflareLine(Vector3 Start, float Rotation, float Telegraph
 // or on one that is not in this pair", never "find the gap" (adjacent lanes are 8y apart and
 // each blast is 6y, so the lanes overlap).
 //
-// Every number here is measured from a clear log (fflogs r7bCpTZQJ2AdzVKH, fight 3, all four
-// Exaflare sets agree): lane offsets and spacing, the 20y start-back, 6 eruptions, 8y per step,
-// 1.47s between steps, 3.0s between pairs, the first pair's arrow going up 2.01s after the boss
-// starts its Exaflare cast, and the first eruption 3.97s after its own arrow.
+// The second eruption trails the first by ~1.6s, longer than the 1.476s between later steps.
 public sealed class UcobP5ExaflaresState
 {
     public const float HitRadius = 6f;              // ExaflareFirst/Rest EffectRange
     public const float Advance = 8f;
-    public const float RollInterval = 1.47f;
+    public const float RollInterval = 1.476f;
     public const int HitsPerLine = 6;
     public const float StartDistance = 20f;
     public const float TelegraphSeconds = 3.97f;    // arrow omen up to its own release (the first eruption)
+    public const float SecondHitSeconds = 5.58f;    // arrow omen up to the second eruption, the first ExaflareRest
 
     public const int PairCount = 3;
     public const float PairInterval = 3f;
     public const float BossCastAt = 3f;
-    public const float BossCastSeconds = 3.7f;
     public const float FirstTelegraphAt = BossCastAt + 2.01f;
 
     // Perpendicular offsets of the six lanes, in firing-agnostic order.
@@ -56,27 +53,21 @@ public sealed class UcobP5ExaflaresState
     public IReadOnlyList<ExaflareHit> Hits { get; }
     public float LastHitAt { get; }
 
-    // The scenario's unscaled clock. Bots schedule their dodges on it rather than on the
-    // EventTimeScale-driven AiManager, so they stay locked to the fire.
-    public EventScheduler Timeline { get; }
+    private readonly Rng rng;
 
-    private readonly Rng rng = new();
+    public UcobP5ExaflaresState(Rng rng, UcobP5ExaflaresStateOverrides overrides)
+        : this(rng, null, null, overrides) { }
 
-    public UcobP5ExaflaresState(UcobP5ExaflaresStateOverrides overrides, EventScheduler timeline)
-        : this(null, null, overrides, timeline) { }
-
-    // `timeline` must be a fresh scheduler the caller ticks itself: a peer never runs the
-    // scenario's own Tick, which is what drives the real one.
-    public static UcobP5ExaflaresState? FromNetworkReplay(float directionRadians, IReadOnlyList<float> laneOrder, EventScheduler timeline)
+    public static UcobP5ExaflaresState? FromNetworkReplay(float directionRadians, IReadOnlyList<float> laneOrder)
     {
         if (laneOrder.Count != LaneOffsets.Count) return null;
         if (!float.IsFinite(directionRadians) || laneOrder.Any(o => !LaneOffsets.Contains(o))) return null;
-        return new UcobP5ExaflaresState(new Direction(directionRadians), laneOrder, null, timeline);
+        return new UcobP5ExaflaresState(Rng.Detached, new Direction(directionRadians), laneOrder, null);
     }
 
-    private UcobP5ExaflaresState(Direction? direction, IReadOnlyList<float>? laneOrder, UcobP5ExaflaresStateOverrides? overrides, EventScheduler timeline)
+    private UcobP5ExaflaresState(Rng rng, Direction? direction, IReadOnlyList<float>? laneOrder, UcobP5ExaflaresStateOverrides? overrides)
     {
-        Timeline = timeline;
+        this.rng = rng;
         Direction = direction ?? overrides!.Direction ?? rng.NextDirection();
 
         var theta = Direction.RadiansFromNorth;
@@ -87,7 +78,7 @@ public sealed class UcobP5ExaflaresState
         // Placement rotation faces +Z at 0, so a compass bearing is its mirror.
         var rotation = MathF.PI - theta;
 
-        var order = laneOrder ?? rng.Shuffle(LaneOffsets.ToArray()).ToList();
+        var order = laneOrder ?? overrides?.LaneOrder ?? rng.Shuffle(LaneOffsets.ToArray()).ToList();
         LaneOrder = order;
         var lines = new List<ExaflareLine>(LaneOffsets.Count);
         var hits = new List<ExaflareHit>(LaneOffsets.Count * HitsPerLine);
@@ -102,7 +93,7 @@ public sealed class UcobP5ExaflaresState
         Lines = lines;
         Hits = hits;
         LastHitAt = FirstTelegraphAt + (PairCount - 1) * PairInterval
-                    + TelegraphSeconds + (HitsPerLine - 1) * RollInterval;
+                    + SecondHitSeconds + (HitsPerLine - 2) * RollInterval;
     }
 
     private static ExaflareLine BuildLine(Vector3 travel, Vector3 lateral, float rotation, float offset, float telegraphAt)
@@ -112,7 +103,7 @@ public sealed class UcobP5ExaflaresState
         for (var i = 0; i < HitsPerLine; i++)
             hits.Add(new ExaflareHit(
                 start + travel * (Advance * i),
-                telegraphAt + TelegraphSeconds + i * RollInterval,
+                telegraphAt + (i == 0 ? TelegraphSeconds : SecondHitSeconds + (i - 1) * RollInterval),
                 telegraphAt));
 
         return new ExaflareLine(start, rotation, telegraphAt, hits);

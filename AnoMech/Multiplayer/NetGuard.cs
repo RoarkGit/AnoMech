@@ -9,24 +9,21 @@ namespace AnoMech.Multiplayer;
 internal static class NetGuard
 {
     public const int MaxStringLength = 192;
-    public const int MaxEnemiesPerSnapshot = 256;
-    public const int MaxTethersPerSnapshot = 128;
-    public const int MaxEventObjectsPerSnapshot = 256;
-    public const int MaxStatusesPerEntity = 64;
-    // Legit sim data, so generous; the host logs anything over (WarnOverVfxCap).
-    public const int MaxLockonVfxPerEntity = 200;
-    public const int MaxVfxPerEntity = 200;
-    public const int MaxLiveOmens = 512;
+    public const int MaxReportedEnemies = 256;
     public const int MaxPendingMapCalls = 512;
+    public const int MaxMapEffectSlots = 128;
     // Bound how long a burst can hold the framework thread.
     public const int MaxQueuedMessages = 8192;
     public const int MaxMessagesPerDrain = 2048;
+    public const int MaxPacketsPerMessage = 4096;
+    // Past the longest cast bar a player action has.
+    public const float MaxPlayerCastSeconds = 10f;
     public const int MaxSessionPeers = 64;
     public const uint MaxHp = 50_000_000;
     public const float MaxMitigationSeconds = 120f;
-    public const int MaxAnimationStateArg = 0xFFFF;
 
     private const float MaxCoordinate = 4096f;
+    private const float MaxSpeed = 100f;
 
     // Control characters would corrupt the diagnostic log's line format, and an unbounded
     // string is a per-frame ImGui hang.
@@ -60,6 +57,8 @@ internal static class NetGuard
 
     public static float Rotation(float value) => IsFinite(value) ? value : 0f;
 
+    public static Vector3 Velocity(float x, float z) => new(Clamp(x, -MaxSpeed, MaxSpeed), 0f, Clamp(z, -MaxSpeed, MaxSpeed));
+
     public static IReadOnlyList<T> Cap<T>(IReadOnlyList<T>? items, int max)
     {
         if (items == null) return [];
@@ -71,7 +70,19 @@ internal static class NetGuard
 
     // Written straight onto a BattleChara, whose sheet row the party list and nameplate resolve.
     public static byte ClassJob(byte value) =>
-        value != 0 && Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.ClassJob>().HasRow(value) ? value : (byte)0;
+        value != 0 && Core.Native.Interfaces.Natives.Data.ClassJob(value) != null ? value : (byte)0;
 
     public static bool InRange(int index, int count) => index >= 0 && index < count;
+
+    public static bool IsReplayableDirectorCategory(uint category) => PacketRules.DirectorCategories.Contains(category);
+
+    private static readonly HashSet<uint> warnedActorControls = [];
+
+    public static bool IsReplayableActorControl(uint category)
+    {
+        if (PacketRules.Controls.ContainsKey(category)) return true;
+        if (warnedActorControls.Add(category))
+            Core.DiagnosticLog.Warn($"[Multiplayer] Dropped ActorControl category 0x{category:X} from the host -- this build never sends it.");
+        return false;
+    }
 }

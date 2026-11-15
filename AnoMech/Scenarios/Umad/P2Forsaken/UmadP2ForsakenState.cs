@@ -1,21 +1,59 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json.Serialization;
 using AnoMech.Core;
+using AnoMech.Core.EnemyActions;
 using AnoMech.Core.Game.Ai;
 using AnoMech.Core.Game.Party;
 using AnoMech.Core.SimObjects;
+using static AnoMech.Core.EnemyActions.EnemyActionEffects;
+using static AnoMech.Core.EnemyActions.Severity;
 using static AnoMech.Scenarios.Umad.UmadConstants;
 
 namespace AnoMech.Scenarios.Umad.P2Forsaken;
 
-public sealed record EndAttack(uint CastBarAction, uint KefkaResolveAction, uint CloneResolveAction, uint AllThingsEnding, float RotationOverride)
+// Only CastBarAction goes over the wire; FromNetworkReplay maps it back to the static instance.
+public sealed record EndAttack(uint CastBarAction)
 {
-    public static readonly EndAttack FuturesEnd =
-        new (ActionId.FutureSEnd, ActionId.FutureSEnd_Resolve, ActionId.FutureSEnd_CloneResolve, ActionId.AllThingsEnding_Future, 0);
+    // Future's End cleaves the half facing the player as the cast starts, Past's End the other half.
+    public static readonly EndAttack FuturesEnd = new(ActionId.FutureSEnd)
+    {
+        KefkaHit = EndHit(ActionId.FutureSEnd_Resolve),
+        CloneHit = EndHit(ActionId.FutureSEnd_CloneResolve),
+        AllThingsEnding = AllThingsEndingHit(ActionId.AllThingsEnding_Future, 0f),
+    };
 
-    public static readonly EndAttack PastsEnd =
-        new (ActionId.PastSEnd, ActionId.PastSEnd_Resolve, ActionId.PastSEnd_CloneResolve, ActionId.AllThingsEnding_Past, MathF.PI);
+    public static readonly EndAttack PastsEnd = new(ActionId.PastSEnd)
+    {
+        KefkaHit = EndHit(ActionId.PastSEnd_Resolve),
+        CloneHit = EndHit(ActionId.PastSEnd_CloneResolve),
+        AllThingsEnding = AllThingsEndingHit(ActionId.AllThingsEnding_Past, MathF.PI),
+    };
+
+    [JsonIgnore] public EnemyAction KefkaHit { get; private init; } = null!;
+    [JsonIgnore] public EnemyAction CloneHit { get; private init; } = null!;
+    [JsonIgnore] public EnemyAction AllThingsEnding { get; private init; } = null!;
+
+    public static EndAttack FromCastBarAction(uint castBarAction)
+        => castBarAction == PastsEnd.CastBarAction ? PastsEnd : FuturesEnd;
+
+    private static EnemyAction EndHit(uint actionId) => new(actionId)
+    {
+        Cast = new() { AnimationLock = 6f },
+        Effects = [Damage(UmadActions.MagicVulns), UmadActions.LongMagicVulnerabilityUp],
+        Timing = new() { DamageDelay = 0.75f },
+    };
+
+    // Snapshots as the ability lands, not at bar end: from bar end there is no time left to reach
+    // the tower that follows. UNVERIFIED in game.
+    private static EnemyAction AllThingsEndingHit(uint actionId, float rotation) => new(actionId)
+    {
+        Cast = new() { AnimationLock = 3f, Rotation = rotation },
+        Area = new() { Size = Geometry.AllThingsEndHalfCone },
+        Effects = [Damage(UmadActions.MagicVulns, Lethal)],
+        Timing = new() { DamageDelay = 1.10f, ResolveSnapshotOffset = CastSpec.ActionEffectOffset },
+    };
 }
 
 // Per-run randomized assignments the scenario and AI consume. Filled in the ctor
@@ -23,21 +61,28 @@ public sealed record EndAttack(uint CastBarAction, uint KefkaResolveAction, uint
 // for the duration of one play. See TopP5DeltaState for the canonical shape.
 public sealed class UmadP2ForsakenState
 {
-    private readonly Rng rng = new();
+    private readonly Rng rng = Rng.Detached;
 
     public EndAttack[] EndAttacks { get; }
     
     public Direction NewNorth { get; }
 
     public int Rotation { get; }
+
+    public const int TowerRounds = 8;
+
+    // Each tower's two new lockons, dealt to its soakers in PartyRole order; indexed as
+    // UmadP2ForsakenStateOverrides.TowerLockons.
+    public uint[][] TowerLockons { get; } = [];
     
     public Dictionary<PartyRole, uint> Lockons = [];
 
-    public UmadP2ForsakenState(SimParty party, UmadP2ForsakenStateOverrides overrides)
+    public UmadP2ForsakenState(Rng rng, SimParty party, UmadP2ForsakenStateOverrides overrides)
     {
-        EndAttacks = [overrides.FirstEndAttack ?? NextEnd(), NextEnd(), NextEnd(), NextEnd()];
+        this.rng = rng;
+        EndAttacks = overrides.EndAttacks.Select(e => e ?? NextEnd()).ToArray();
         NewNorth = overrides.NewNorth ?? rng.NextDirection();
-        Rotation = rng.NextSign();
+        Rotation = overrides.Rotation ?? rng.NextSign();
 
         var supportLockon = overrides.SupportLockon ?? rng.NextObj(LockonId.ForsakenChariot, LockonId.ForsakenCone);
         var dpsLockon = supportLockon == LockonId.ForsakenChariot ? LockonId.ForsakenCone : LockonId.ForsakenChariot;
@@ -49,7 +94,20 @@ public sealed class UmadP2ForsakenState
         Lockons[overrides.SupportStackRole ?? rng.NextObj(supports.ToArray())] = LockonId.ForsakenStack;
         Lockons[overrides.DpsStackRole ?? rng.NextObj(dps.ToArray())] = LockonId.ForsakenStack;
         DiagnosticLog.Info($"Lockon assigments: {string.Join(",", Enum.GetValues<PartyRole>().Select(r => Lockons[r]))}");
+
+        TowerLockons = Enumerable.Range(0, TowerRounds)
+            .SelectMany(round => rng.Shuffle(RoundLockons(round)).Chunk(2))
+            .Select((dealt, tower) => overrides.TowerLockons[tower] ?? dealt)
+            .ToArray();
     }
+
+    // The four lockons a round's towers hand out between them.
+    public static uint[] RoundLockons(int round) => round switch
+    {
+        6 => [LockonId.ForsakenStack, LockonId.ForsakenStack, LockonId.ForsakenCone, LockonId.ForsakenStack],
+        _ when round % 2 == 0 => [LockonId.ForsakenCone, LockonId.ForsakenCone, LockonId.ForsakenChariot, LockonId.ForsakenChariot],
+        _ => [LockonId.ForsakenStack, LockonId.ForsakenStack, LockonId.ForsakenCone, LockonId.ForsakenChariot],
+    };
 
     // Network-replay constructor: reconstructs the full state from values the
     // host already rolled and broadcast, instead of drawing fresh RNG. Used
@@ -70,7 +128,7 @@ public sealed class UmadP2ForsakenState
 
     public static UmadP2ForsakenState FromNetworkReplay(
         EndAttack[] endAttacks, float newNorthRadians, int rotation, Dictionary<PartyRole, uint> lockons)
-        => new(endAttacks, new Direction(newNorthRadians), rotation, lockons);
+        => new(endAttacks.Select(e => EndAttack.FromCastBarAction(e.CastBarAction)).ToArray(), new Direction(newNorthRadians), rotation, lockons);
 
     public (Direction, Direction) GetTowers(int index)
     {

@@ -9,6 +9,7 @@ using AnoMech.Core.Map;
 using AnoMech.Core.SimObjects;
 using AnoMech.Multiplayer;
 using static AnoMech.Scenarios.Top.TopConstants;
+using Actions = AnoMech.Scenarios.Top.TopActions;
 
 namespace AnoMech.Scenarios.Top.P6WaveCannon2;
 
@@ -25,12 +26,11 @@ public sealed class TopP6WaveCannon2Scenario : IMultiplayerReplayable
 
     public IReadOnlyList<IScenarioAi> AiStrats => [new TopP6WaveCannon2Ai()];
 
-    private TopUtils topUtils = null!;
 
     private TopP6WaveCannon2State state = null!;
     private SimWorld world = null!;
     private SimParty party = null!;
-    private DamageSolver damage = null!;
+    private SimEnemy? alphaOmega;
 
     // Exposed so MultiplayerManager can read the AI-relevant subset (InFirst) after a host
     // Start and broadcast it -- see UmadP3BlackHoleScenario.LastState for the pattern.
@@ -40,15 +40,11 @@ public sealed class TopP6WaveCannon2Scenario : IMultiplayerReplayable
     {
         world = worldParam;
         party = worldParam.Party;
-        state = new TopP6WaveCannon2State(party, settingsWindow.Overrides);
+        state = new TopP6WaveCannon2State(world.Rng, party, settingsWindow.Overrides);
         LastState = state;
         var solo = selectedAi is null;
         if (selectedAi is { } idx && idx < AiStrats.Count)
             ((IScenarioAi<TopP6WaveCannon2State>)AiStrats[idx]).Run(state, world);
-        topUtils = new TopUtils(world);
-        damage = new DamageSolver(party);
-        damage.SetStatuses(DamageType.Magic, StatusId.MagicVulnerabilityUp);
-
         world.Events.Add(1f, () => state.ProteanOrder.ForEach(c => c.AddStatus(StatusId.BrilliantDynamis)));
         Run_Alpha_Omega_4000A771(solo);
         Run_Alpha_Omega_4000A40B();
@@ -60,15 +56,16 @@ public sealed class TopP6WaveCannon2Scenario : IMultiplayerReplayable
 
     private void Run_Alpha_Omega_4000A771(bool solo)
     {
-        SimEnemy? alpha_Omega_4000A771 = null;
-        world.Events.Add(0f, () => alpha_Omega_4000A771 = world.SpawnEnemy(new EnemySpawnConfig(BNpcBaseId: BNpcBaseId.AlphaOmega, NameId: BNpcNameId.AlphaOmega, Level: 90, Targetable: true, EnemyList: EnemyListMode.Always, IsVisible: true, Placement: new Placement(new Vector3(0.000f, -0.000f, 0.000f), -MathF.PI))));
-        world.Events.Add(0.5f, () => alpha_Omega_4000A771?.AddStatus(StatusId.CodeMi));
-        world.Events.Add(1.90f, () => alpha_Omega_4000A771?.Cast(ActionId.CosmoArrow, targetLocation: new Vector3(-0.008f, -0.015f, -0.008f), targetId: alpha_Omega_4000A771?.GameObjectId));
+        world.Events.Add(0f, () => alphaOmega = world.SpawnEnemy(new EnemySpawnConfig(BNpcBaseId: BNpcBaseId.AlphaOmega, NameId: BNpcNameId.AlphaOmega, Level: 90, Targetable: true, EnemyList: EnemyListMode.Always, Visibility: SpawnVisibility.Visible, LayoutId: BNpcLayoutId.AlphaOmega, Placement: new Placement(new Vector3(0.000f, -0.000f, 0.000f), -MathF.PI))));
+        world.Events.Add(0.5f, () => alphaOmega?.AddStatus(StatusId.CodeMi));
+        world.Events.Add(1.90f, () => alphaOmega?.Cast(Actions.CosmoArrow, new Vector3(-0.008f, -0.015f, -0.008f)));
         if (solo) return;
-        world.Events.Add(16.03f, () => alpha_Omega_4000A771?.Cast(ActionId.WaveCannon_7BA9, targetLocation: new Vector3(-0.008f, -0.015f, -0.008f), targetId: alpha_Omega_4000A771?.GameObjectId));
-        world.Events.Add(27.30f, () => alpha_Omega_4000A771?.Face(party.Get(state.WildChargeTarget)!));
-        world.Events.Add(27.40f, () => alpha_Omega_4000A771?.Cast(ActionId.WaveCannonWildCharge, castSeconds: 0f, targetId:party.Get(state.WildChargeTarget)?.GameObjectId));
-        world.Events.Add(27.40f, () => damage.Resolve(alpha_Omega_4000A771, ActionId.WaveCannonWildCharge, [DamageType.Magic], [], stackMinTargets: 8, wildChargeTargets: 2, wildChargeDamageType: [DamageType.TankBuster]));
+        world.Events.Add(16.03f, () => alphaOmega?.Cast(Actions.AlphaOmegaWaveCannon, new Vector3(-0.008f, -0.015f, -0.008f)));
+        world.Events.Add(27.40f, () =>
+        {
+            if (party.Get(state.WildChargeTarget) is { } target)
+                alphaOmega?.Cast(Actions.WaveCannonWildCharge, target);
+        });
     }
     
     
@@ -103,28 +100,12 @@ public sealed class TopP6WaveCannon2Scenario : IMultiplayerReplayable
         
         for (int i = 0; i < 12; i++)
         {
-            SimEnemy? alpha_Omega_4000A40B = null;
-            world.Events.Add(0f, () => alpha_Omega_4000A40B = world.SpawnEnemy(new EnemySpawnConfig(BNpcBaseId: BNpcBaseId.OmegaHelper, NameId: BNpcNameId.AlphaOmega, Level: 1, Targetable: false, EnemyList: EnemyListMode.Never, IsVisible: false, Placement: new Placement(new Vector3(0.200f, -0.000f, 19.320f), 3.140f))));
-            
             var offset = initial[i/4];
             var e = early[i/4];
             var pos = i % 2 == 0 ? new Placement(new(-20f, 0, offset), MathF.PI/2) : new Placement(new(offset, 0, -20), 0);
-            var actionId = i % 4 > 1 ? ActionId.Inhale : ActionId.CosmoArrowOmen;
-            
-            if (e)
-            {
-                world.Events.Add(1.82f, () => alpha_Omega_4000A40B?.SetPosition(pos));
-                world.Events.Add(1.90f, () => alpha_Omega_4000A40B?.Cast(actionId, targetId: alpha_Omega_4000A40B?.GameObjectId));
-                if (actionId == ActionId.CosmoArrowOmen)
-                    world.Events.Add(9.90f, () => damage.Resolve(alpha_Omega_4000A40B, ActionId.CosmoArrowOmen, [DamageType.Lethal], []));
-            }
-            else 
-            {
-                world.Events.Add(3.82f, () => alpha_Omega_4000A40B?.SetPosition(pos));
-                world.Events.Add(3.91f, () => alpha_Omega_4000A40B?.Cast(actionId, targetId: alpha_Omega_4000A40B?.GameObjectId));
-                if (actionId == ActionId.CosmoArrowOmen)
-                    world.Events.Add(11.91f, () => damage.Resolve(alpha_Omega_4000A40B, ActionId.CosmoArrowOmen, [DamageType.Lethal], []));
-            }
+            var inhale = i % 4 > 1;
+
+            world.Events.Add(e ? 1.90f : 3.91f, () => alphaOmega?.CastFromHelper(inhale ? Actions.Inhale : Actions.CosmoArrowOmen, at: pos));
             
             var list = Init(early, initial, []);
             for (int k = 0; k < 7; k++)
@@ -136,9 +117,7 @@ public sealed class TopP6WaveCannon2Scenario : IMultiplayerReplayable
                     var pos2 = newI % 2 == 0 ? new Placement(new(-20f, 0, offset), MathF.PI/2) : new Placement(new(offset, 0, -20), 0);
                     var delta = k * 2f;
                     
-                    world.Events.Add(11.82f + delta, () => alpha_Omega_4000A40B?.SetPosition(pos2));
-                    world.Events.Add(11.91f + delta, () => alpha_Omega_4000A40B?.Cast(ActionId.CosmoArrowDamage, castSeconds: 0f));
-                    world.Events.Add(11.91f + delta, () => damage.Resolve(alpha_Omega_4000A40B,ActionId.CosmoArrowDamage, [DamageType.Lethal], []));
+                    world.Events.Add(11.91f + delta, () => alphaOmega?.CastFromHelper(Actions.CosmoArrowLine, at: pos2));
                 }
                 list = k == 0 ? Init(early, initial, list) : Progress(list);
             }
@@ -149,17 +128,15 @@ public sealed class TopP6WaveCannon2Scenario : IMultiplayerReplayable
     {
         for (int index = 0; index < 4; index++)
         {
-            SimEnemy? alpha_Omega_4000A40C = null;
             var i = index;
-            world.Events.Add(0f, () => alpha_Omega_4000A40C = world.SpawnEnemy(new EnemySpawnConfig(BNpcBaseId: BNpcBaseId.OmegaHelper, NameId: BNpcNameId.AlphaOmega, Level: 1, Targetable: false, EnemyList: EnemyListMode.Never, IsVisible: false, Placement: new Placement(new Vector3(0f, -0.000f, 0.000f), 1.570f))));
-            world.Events.Add(19.00f, () => alpha_Omega_4000A40C?.Face(state.ProteanOrder.Get(i)));
-            world.Events.Add(19.07f, () => alpha_Omega_4000A40C?.Cast(ActionId.WaveCannonProtean, castSeconds: 0f, targetId: state.ProteanOrder.Get(i)?.GameObjectId));
-            world.Events.Add(19.07f, () => damage.Resolve(alpha_Omega_4000A40C, ActionId.WaveCannonProtean, [DamageType.Magic], [(StatusId.MagicVulnerabilityUp, 2.5f)]));
-            world.Events.Add(21.00f, () => alpha_Omega_4000A40C?.Face(state.ProteanOrder.Get(i + 4)));
-            world.Events.Add(21.07f, () => alpha_Omega_4000A40C?.Cast(ActionId.WaveCannonProtean, castSeconds: 0f, targetId: state.ProteanOrder.Get(i + 4)?.GameObjectId));
-            world.Events.Add(21.07f, () => damage.Resolve(alpha_Omega_4000A40C, ActionId.WaveCannonProtean, [DamageType.Magic], [(StatusId.MagicVulnerabilityUp, 2.5f)]));
+            world.Events.Add(19.07f, () => CastProtean(state.ProteanOrder.Get(i)));
+            world.Events.Add(21.07f, () => CastProtean(state.ProteanOrder.Get(i + 4)));
         }
+    }
 
+    private void CastProtean(SimCharacter? target)
+    {
+        if (target is not null) alphaOmega?.CastFromHelper(Actions.WaveCannonProtean, target);
     }
 
     public MpMessage? BuildReplayStateMessage()

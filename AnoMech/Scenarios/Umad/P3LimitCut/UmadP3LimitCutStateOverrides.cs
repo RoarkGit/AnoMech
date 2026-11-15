@@ -13,14 +13,12 @@ public sealed class UmadP3LimitCutStateOverrides
     public int? StartSpot { get; set; } = null;
     // null = an even coin flip.
     public bool? Clockwise { get; set; } = null;
-    // Intercardinal the tanks hold both bosses at (1 = SE, 3 = NE, 5 = NW, 7 = SW); null = random.
+    // Intercardinal the wind crystal lands on, where the tanks hold both bosses (1 = SE, 3 = NE,
+    // 5 = NW, 7 = SW); null = random.
     public int? BossSpot { get; set; } = null;
     // Who the bots send out as the Umbra Smash bait; null = the physical ranged. One seat is
     // named, but the choice is the fight's, not that player's own setting.
     public PartyRole? BaitRole { get; set; } = null;
-    // Whether a bot tank pops LB3 at the real 13.5s; null = only when the real player is not a
-    // tank (a tank practises their own press).
-    public bool? BotTankLimitBreak { get; set; } = null;
     // Black Hole's Thunder III plan for the one set that follows the charges (see
     // ThunderIIIAssignment). The default is what the fight almost always does: the Chaos tank
     // steps onto Exdeath and invulns both.

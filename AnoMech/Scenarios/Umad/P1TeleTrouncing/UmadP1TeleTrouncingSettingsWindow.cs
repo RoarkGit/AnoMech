@@ -8,13 +8,6 @@ public sealed class UmadP1TeleTrouncingSettingsWindow
 {
     public UmadP1TeleTrouncingStateOverrides Overrides { get; } = new();
 
-#if DEBUG
-    // Index-aligned with PropBeatMode, ArrowSoakMode and CarryMode.
-    private static readonly string[] BeatModeLabels = ["ActorControl 413", "PlayAnimation", "SetSharedTimelineState"];
-    private static readonly string[] SoakModeLabels = ["ActorControl 106", "SetSharedTimelineState", "Despawn"];
-    private static readonly string[] CarryModeLabels = ["ActorControl 241", "ActorControl 241, self-targeted", "Sim slide"];
-#endif
-
     // fireAppear/fireWindUp: fire the statue beats right now (null while no run is active), so
     // the props can be exercised without waiting out the timeline each time.
     public void Draw(Action? fireAppear = null, Action? fireWindUp = null)
@@ -24,6 +17,7 @@ public sealed class UmadP1TeleTrouncingSettingsWindow
         {
             SettingsGrid.FightOnlyNote();
             DrawDifferentArrows();
+            TriStateRow("Confused:", "confused", "DPS", "Support", Overrides.DpsGetsConfused, v => Overrides.DpsGetsConfused = v);
             TriStateRow("Gaze:", "gaze", "Inverted", "Normal", Overrides.GazeInverted, v => Overrides.GazeInverted = v);
             TriStateRow("Fire:", "fire", "Stack", "Spread", Overrides.FireIsStack, v => Overrides.FireIsStack = v);
             TriStateRow("Fire orb:", "firelie", "Lie", "Truth", Overrides.FireIsLie, v => Overrides.FireIsLie = v);
@@ -33,8 +27,6 @@ public sealed class UmadP1TeleTrouncingSettingsWindow
 #if DEBUG
             DrawPropKnobs();
             DrawPropBeatRow(fireAppear, fireWindUp);
-            DrawArrowRows();
-            DrawHazeRow();
 #endif
             SettingsGrid.End();
         }
@@ -44,38 +36,18 @@ public sealed class UmadP1TeleTrouncingSettingsWindow
     private void DrawPropBeatRow(Action? fireAppear, Action? fireWindUp)
     {
         SettingsGrid.Row("Statue beats (debug):");
-        var modeIdx = (int)Overrides.PropsBeatMode;
-        SettingsGrid.ItemWidth(170);
-        if (ImGui.Combo("##propbeatmode", ref modeIdx, BeatModeLabels, BeatModeLabels.Length))
-            Overrides.PropsBeatMode = (PropBeatMode)modeIdx;
-        ImGui.SameLine();
         ImGui.BeginDisabled(fireAppear == null);
         if (ImGui.Button("Appear now##propappear")) fireAppear?.Invoke();
         ImGui.SameLine();
         if (ImGui.Button("Wind-up now##propwindup")) fireWindUp?.Invoke();
         ImGui.EndDisabled();
     }
-
-    private void DrawArrowRows()
-    {
-        SettingsGrid.Row("Arrow soak (debug):");
-        var soakIdx = (int)Overrides.ArrowSoak;
-        SettingsGrid.ItemWidth(170);
-        if (ImGui.Combo("##arrowsoak", ref soakIdx, SoakModeLabels, SoakModeLabels.Length))
-            Overrides.ArrowSoak = (ArrowSoakMode)soakIdx;
-        SettingsGrid.Row("Arrow carry (debug):");
-        var carryIdx = (int)Overrides.ArrowCarry;
-        SettingsGrid.ItemWidth(170);
-        if (ImGui.Combo("##arrowcarry", ref carryIdx, CarryModeLabels, CarryModeLabels.Length))
-            Overrides.ArrowCarry = (AnoMech.Core.Native.CarryMode)carryIdx;
-    }
 #endif
 
     private void ResetAll()
     {
-        Overrides.ArrowSoak = ArrowSoakMode.SetSharedTimelineState;
-        Overrides.ArrowCarry = AnoMech.Core.Native.CarryMode.Native;
         Overrides.DpsGetsDifferent = null;
+        Overrides.DpsGetsConfused = null;
         Overrides.GazeInverted = null;
         Overrides.FireIsStack = null;
         Overrides.FireIsLie = null;
@@ -83,35 +55,14 @@ public sealed class UmadP1TeleTrouncingSettingsWindow
         Overrides.ThunderOrientationFlipped = null;
         Overrides.ThunderRealOffset = null;
         Overrides.PropsBindDirector = true;
-        Overrides.PropsForceActive = false;
-        Overrides.PropsStaticVfxTest = false;
-        Overrides.PropsBeatMode = PropBeatMode.ActorControl;
-        Overrides.HoldHaze = false;
-        UmadZone.SuppressP1Scenery = false;
     }
 
 #if DEBUG
-    private void DrawHazeRow()
-    {
-        SettingsGrid.Row("Zone (debug):");
-        var haze = Overrides.HoldHaze;
-        if (ImGui.Checkbox("Hold P1 haze##holdhaze", ref haze)) Overrides.HoldHaze = haze;
-        ImGui.SameLine();
-        var scenery = UmadZone.SuppressP1Scenery;
-        if (ImGui.Checkbox("Deactivate scenery SGs##scenerysg", ref scenery)) UmadZone.SuppressP1Scenery = scenery;
-    }
-
     private void DrawPropKnobs()
     {
         SettingsGrid.Row("Statue props (debug):");
         var bind = Overrides.PropsBindDirector;
         if (ImGui.Checkbox("Bind to director##propbind", ref bind)) Overrides.PropsBindDirector = bind;
-        ImGui.SameLine();
-        var force = Overrides.PropsForceActive;
-        if (ImGui.Checkbox("Force SG active##propforce", ref force)) Overrides.PropsForceActive = force;
-        ImGui.SameLine();
-        var direct = Overrides.PropsStaticVfxTest;
-        if (ImGui.Checkbox("Direct VFX test##propvfx", ref direct)) Overrides.PropsStaticVfxTest = direct;
     }
 #endif
 

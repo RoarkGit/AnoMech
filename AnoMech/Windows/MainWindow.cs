@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Numerics;
 using System.Reflection;
@@ -12,8 +13,12 @@ using AnoMech.Core.Map;
 using AnoMech.Core;
 using AnoMech.Core.Game.Ai;
 using AnoMech.Core.Game.Party;
+using SessionStatus = AnoMech.Core.Game.SessionStatus;
+using PracticeLoop = AnoMech.Core.Game.PracticeLoop;
+using AnoMech.Core.SimObjects;
 using AnoMech.Scenarios;
 using static AnoMech.Core.Game.Game;
+using AnoMech.Core.Native.Implementations;
 
 namespace AnoMech.Windows;
 
@@ -24,8 +29,10 @@ public unsafe class MainWindow : Window, IDisposable
 
     internal static readonly Vector4 StartColor = new(0.18f, 0.40f, 0.24f, 0.92f);
     internal static readonly Vector4 StopColor = new(0.45f, 0.14f, 0.16f, 0.92f);
+    private static readonly Vector4 StopRunColor = new(0.30f, 0.30f, 0.33f, 0.92f);
     private static readonly Vector4 RunningColor = new(0.35f, 0.85f, 0.45f, 1f);
-    private static readonly Vector4 PausedColor = new(1f, 0.65f, 0.25f, 1f);
+    private static readonly Vector4 MistakeColor = new(1f, 0.65f, 0.25f, 1f);
+    private static readonly Vector4 FailedColor = new(1f, 0.38f, 0.35f, 1f);
     // Fixed rather than theme-derived: Dalamud's default ButtonActive is red, which reads as
     // "stop"/error next to the semantic Start/Stop buttons.
     private static readonly Vector4 SelectionColor = new(0.30f, 0.55f, 0.85f, 1f);
@@ -47,21 +54,30 @@ public unsafe class MainWindow : Window, IDisposable
     internal IScenario? SelectedScenario => _selectedScenario;
     private IScenario? _selectedScenario;
 
-    internal PartyRole? SelectedRoleOverride => _roleOverride;
+    internal ScenarioSelection? Selection => _selectedScenario is { } scenario
+        ? new ScenarioSelection(scenario, HasStartableStrat() ? _selectedStrat : null, _selectedWaymark, SelectedSeed, _roleOverride)
+        : null;
+
     private PartyRole? _roleOverride;
     private bool _soloMode;
 
     // Index into the selected scenario's AiStrats; reset to the first strat whenever the
-    // selected scenario changes. Passed to RunScenario as selectedAi on a (non-solo) Start.
-    // -1 when a grouped scenario's selected region has no strats (Start is then gated off).
-    internal int SelectedStrat => _selectedStrat;
+    // selected scenario changes. -1 when a grouped scenario's selected region has no strats
+    // (Start is then gated off).
     private int _selectedStrat;
 
     // Index into the selected zone's WaymarkPresets. Remembered per zone so switching between
     // scenarios in the same encounter keeps the chosen layout.
-    internal int SelectedWaymark => _selectedWaymark;
     private int _selectedWaymark;
     private readonly Dictionary<IZone, int> _waymarkMemory = new();
+
+    // Seed for the next Start: empty rolls a fresh one each time, a number replays it every time.
+#if DEBUG
+    private int? SelectedSeed => int.TryParse(_seedText.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var seed) ? seed : null;
+    private string _seedText = "";
+#else
+    private int? SelectedSeed => null;
+#endif
 
     // The region/group label currently selected in the strat picker, for scenarios that
     // declare StratGroups. Null until a grouped scenario is drawn (then it snaps to the
@@ -83,15 +99,20 @@ public unsafe class MainWindow : Window, IDisposable
 
     // <Version> from AnoMech.csproj flows into the assembly version; surface it in the
     // title bar. Use a ### id so the window identity stays "MainWindow" across versions.
+    private static readonly string TitleText = TitleWithVersion();
+
     private static string TitleWithVersion()
     {
         var v = Assembly.GetExecutingAssembly().GetName().Version;
         var version = v is null ? "" : $" v{v.Major}.{v.Minor}.{v.Build}.{v.Revision}";
-        return $"AnoMech{version}###MainWindow";
+        return $"AnoMech{version}";
     }
 
+    // The title bar still shows while the window is collapsed for the run.
+    private static string Title(bool failed) => $"{TitleText}{(failed ? " — Failed" : "")}###MainWindow";
+
     public MainWindow(Plugin plugin)
-        : base(TitleWithVersion())
+        : base(Title(failed: false))
     {
         var uiScale = ImGuiHelpers.GlobalScale;
         SizeConstraints = new WindowSizeConstraints
@@ -103,7 +124,7 @@ public unsafe class MainWindow : Window, IDisposable
 
         this.plugin = plugin;
         ScenarioPanel = new ScenarioPanelWindow(this);
-        PartyPanel = new PartyPanelWindow(this, plugin.Multiplayer);
+        PartyPanel = new PartyPanelWindow(this, Plugin.Multiplayer);
         multiplayerUi = new MultiplayerUi(plugin);
         IsOpen = false;
         RestoreSelectedScenario();
@@ -146,16 +167,14 @@ public unsafe class MainWindow : Window, IDisposable
 
     private bool _wasInInstance;
     private bool _wasScenarioActive;
-    private bool _wasScenarioMistake;
-    private bool _wasScenarioFailed;
-    private bool _wasScenarioSucceeded;
+    private SessionStatus _lastStatus;
     private bool _clearCollapsedRequest;
 
-    // A peer never sets Game.ActiveScenario: in a session the run is the session's.
-    private bool RunActive => plugin.Multiplayer.SessionCode != null ? plugin.Multiplayer.IsRunning : plugin.Game.IsScenarioActive;
+    // In a session the run counts from the start handshake, before Game has one.
+    private bool RunActive => Plugin.Multiplayer.SessionCode != null ? Plugin.Multiplayer.IsRunning : Plugin.Game.Status >= SessionStatus.Running;
 
-    private bool InSession => plugin.Multiplayer.InSession;
-    private bool IsGuest => plugin.Multiplayer.SessionCode != null && !plugin.Multiplayer.IsHost;
+    private bool InSession => Plugin.Multiplayer.InSession;
+    private bool IsGuest => Plugin.Multiplayer.SessionCode != null && !Plugin.Multiplayer.IsHost;
 
     // The whole window becomes the multiplayer setup screen until a session starts.
     private bool _showMultiplayerSetup;
@@ -174,14 +193,14 @@ public unsafe class MainWindow : Window, IDisposable
     {
         var inSession = InSession;
         if (inSession) _showMultiplayerSetup = false;
-        else if (_wasInSession && plugin.Multiplayer.SessionEndReason != null) _showMultiplayerSetup = true;
+        else if (_wasInSession && Plugin.Multiplayer.SessionEndReason != null) _showMultiplayerSetup = true;
         _wasInSession = inSession;
     }
 
     // A guest runs whatever the host picked, so its window shows that scenario.
     private void FollowHostScenario()
     {
-        if (!IsGuest || plugin.Multiplayer.TryResolveScenario() is not { } hostScenario) return;
+        if (!IsGuest || Plugin.Multiplayer.TryResolveScenario() is not { } hostScenario) return;
         if (_selectedScenario != hostScenario) SelectScenario(hostScenario, persist: false);
     }
 
@@ -199,23 +218,15 @@ public unsafe class MainWindow : Window, IDisposable
         }
 
         var scenarioActive = RunActive;
-        var scenarioMistake = plugin.Game.HasScenarioMistake;
-        var scenarioFailed = plugin.Game.HasScenarioFailed;
-        var scenarioSucceeded = plugin.Game.HasScenarioSucceeded;
+        var status = Plugin.Game.Status;
+        WindowName = Title(Plugin.Game.LastRun is { } lastRun && IsFailed(lastRun.Status));
         if (scenarioActive && !_wasScenarioActive)
         {
             if (Plugin.Config.AutoCollapseWhileRunning)
                 RequestCollapsed(true);
         }
-        if (scenarioMistake && !_wasScenarioMistake)
-        {
-            RequestCollapsed(false);
-        }
-        else if (scenarioFailed && !_wasScenarioFailed)
-        {
-            RequestCollapsed(false);
-        }
-        else if (scenarioSucceeded && !_wasScenarioSucceeded)
+        // Not on a failure the run plays on from: expanding mid-fight gets in the way.
+        if (status >= SessionStatus.Frozen && status != _lastStatus)
         {
             RequestCollapsed(false);
         }
@@ -224,7 +235,7 @@ public unsafe class MainWindow : Window, IDisposable
             RequestCollapsed(false);
         }
 
-        var inInstance = plugin.Game.World.Map.IsInInstance;
+        var inInstance = Plugin.Game.World.Map.IsInInstance;
         if (inInstance)
         {
             IsOpen = true;
@@ -251,9 +262,7 @@ public unsafe class MainWindow : Window, IDisposable
         }
 
         _wasScenarioActive = scenarioActive;
-        _wasScenarioMistake = scenarioMistake;
-        _wasScenarioFailed = scenarioFailed;
-        _wasScenarioSucceeded = scenarioSucceeded;
+        _lastStatus = status;
         _wasInInstance = inInstance;
     }
 
@@ -306,12 +315,12 @@ public unsafe class MainWindow : Window, IDisposable
     {
         var style = ImGui.GetStyle();
         var widest = 0f;
-        foreach (var zone in plugin.Game.Zones)
+        foreach (var zone in Plugin.Game.Catalog.Zones)
         {
             widest = Math.Max(widest, ImGui.CalcTextSize(zone.Name).X + style.IndentSpacing);
-            foreach (var phase in plugin.Game.PhasesOf(zone))
-                foreach (var scenario in plugin.Game.ScenariosOf(phase))
-                    widest = Math.Max(widest, ImGui.CalcTextSize(DisplayName(scenario)).X + style.IndentSpacing);
+            foreach (var phase in Plugin.Game.Catalog.PhasesOf(zone))
+                foreach (var scenario in Plugin.Game.Catalog.ScenariosOf(phase))
+                    widest = Math.Max(widest, ImGui.CalcTextSize(scenario.DisplayName()).X + style.IndentSpacing);
         }
         var measured = widest
             + style.FramePadding.X * 2
@@ -326,7 +335,7 @@ public unsafe class MainWindow : Window, IDisposable
     {
         // Switching scenarios inside a loaded zone skips the zone reload, so another zone's
         // scenario would run on the wrong territory.
-        var lockedZone = plugin.Game.World.Map.IsInInstance ? _selectedScenario?.Phase.Zone : null;
+        var lockedZone = Plugin.Game.World.Map.IsInInstance ? _selectedScenario?.Phase.Zone : null;
         ImGui.TextUnformatted(lockedZone?.Name ?? "Scenarios");
         ImGui.Separator();
 
@@ -336,7 +345,7 @@ public unsafe class MainWindow : Window, IDisposable
             DrawZoneScenarios(lockedZone, right);
             return;
         }
-        foreach (var zone in plugin.Game.Zones)
+        foreach (var zone in Plugin.Game.Catalog.Zones)
         {
             var shouldOpen = _openZone == zone;
             ImGui.SetNextItemOpen(shouldOpen, ImGuiCond.Always);
@@ -369,8 +378,8 @@ public unsafe class MainWindow : Window, IDisposable
         buttonPadding.X += ScenarioButtonExtraPadding * ImGuiHelpers.GlobalScale;
         ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, buttonPadding);
         ImGui.PushStyleVar(ImGuiStyleVar.ButtonTextAlign, new Vector2(0f, 0.5f));
-        foreach (var phase in plugin.Game.PhasesOf(zone))
-            foreach (var scenario in plugin.Game.ScenariosOf(phase))
+        foreach (var phase in Plugin.Game.Catalog.PhasesOf(zone))
+            foreach (var scenario in Plugin.Game.Catalog.ScenariosOf(phase))
             {
                 var selected = _selectedScenario == scenario;
                 var mpUnsupported = inSession && !scenario.SupportsMultiplayer;
@@ -379,10 +388,10 @@ public unsafe class MainWindow : Window, IDisposable
                 // Zone-qualified: two zones can hold same-named scenarios (UMAD and UCOB
                 // both have a P5 "Exaflares"), and a shared ImGui id makes the second
                 // button unclickable.
-                ImGui.PushID(FullName(scenario));
+                ImGui.PushID(scenario.FullName());
                 var buttonWidth = sectionRight - ImGui.GetCursorScreenPos().X;
                 ImGui.BeginDisabled(mpUnsupported || guest);
-                var clicked = ImGui.Button(DisplayName(scenario), new Vector2(buttonWidth, 0));
+                var clicked = ImGui.Button(scenario.DisplayName(), new Vector2(buttonWidth, 0));
                 ImGui.EndDisabled();
                 if ((mpUnsupported || guest) && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
                     ImGui.SetTooltip(guest ? "The host picks the scenario." : "This scenario doesn't support multiplayer.");
@@ -404,10 +413,10 @@ public unsafe class MainWindow : Window, IDisposable
     private void RestoreSelectedScenario()
     {
         if (string.IsNullOrEmpty(Plugin.Config.LastSelectedScenario)) return;
-        foreach (var scenario in plugin.Game.Scenarios)
+        foreach (var scenario in Plugin.Game.Catalog.Scenarios)
         {
             if (!string.Equals(
-                    FullName(scenario),
+                    scenario.FullName(),
                     Plugin.Config.LastSelectedScenario,
                     StringComparison.Ordinal))
                 continue;
@@ -435,7 +444,7 @@ public unsafe class MainWindow : Window, IDisposable
 
         if (persist)
         {
-            Plugin.Config.LastSelectedScenario = FullName(scenario);
+            Plugin.Config.LastSelectedScenario = scenario.FullName();
             Plugin.Config.Save();
         }
     }
@@ -464,7 +473,7 @@ public unsafe class MainWindow : Window, IDisposable
             return;
         }
 
-        var game = plugin.Game;
+        var game = Plugin.Game;
         var mpGuest = IsGuest;
         ReconcileSetup(inSession, mpGuest);
 #if DEBUG
@@ -476,7 +485,7 @@ public unsafe class MainWindow : Window, IDisposable
         DrawPrimaryActions(game, inSession);
         if (!inSession) DrawSoloOption(game);
         DrawLocationHint();
-        DrawRunOptions(game, inSession);
+        DrawRunOptions(game, Plugin.Practice, inSession);
 
         ImGui.Spacing();
         DrawSections(_selectedScenario, inSession, mpGuest);
@@ -495,6 +504,54 @@ public unsafe class MainWindow : Window, IDisposable
         }
         ReconcileStrat();
     }
+
+#if DEBUG
+    private void DrawSeedControl()
+    {
+        ImGui.SetNextItemWidth(120f * ImGuiHelpers.GlobalScale);
+        ImGui.InputTextWithHint("Seed##run-seed", "random", ref _seedText, 16, ImGuiInputTextFlags.CharsDecimal);
+        if (_seedText.Length > 0)
+        {
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Clear##run-seed")) _seedText = "";
+        }
+
+        // The world keeps its last run's Rng until the next start reseeds it.
+        var lastText = Plugin.Game.World.Rng.Seed.ToString(CultureInfo.InvariantCulture);
+        ImGui.TextUnformatted($"Last seed: {lastText}");
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Reuse##last-seed")) _seedText = lastText;
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Copy##last-seed")) ImGui.SetClipboardText(lastText);
+        ImGui.Separator();
+    }
+
+    // In a session MultiplayerManager owns DebugBotControl.Enabled per run, so route through its
+    // sticky toggle (as the Party panel does); solo nothing else writes the flag.
+    private void DrawBotControlsPlayer(bool inSession)
+    {
+        var mp = Plugin.Multiplayer;
+        if (inSession)
+        {
+            var botControlled = mp.DebugBotControlled;
+            ImGui.BeginDisabled(mp.Session.Started);
+            if (ImGui.Checkbox("Bot controls player##bot-controls-player", ref botControlled))
+                mp.SetDebugBotControlled(botControlled);
+            ImGui.EndDisabled();
+        }
+        else
+        {
+            var enabled = DebugBotControl.Enabled;
+            if (ImGui.Checkbox("Bot controls player##bot-controls-player", ref enabled))
+                DebugBotControl.Enabled = enabled;
+        }
+        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+            ImGui.SetTooltip(inSession
+                ? "Your seat is driven by the strat's AI. Locked once the fight starts."
+                : "Your character is driven by the strat's AI, like a bot in your role.");
+        ImGui.Separator();
+    }
+#endif
 
     // _selectedStrat stays an absolute index into AiStrats (what RunScenario consumes): for a
     // grouped scenario, a strat of the selected region (its first when the pick isn't in it, -1
@@ -569,6 +626,8 @@ public unsafe class MainWindow : Window, IDisposable
         if (ImGui.TreeNodeEx("Debug###debug-v3",
                 ImGuiTreeNodeFlags.FramePadding))
         {
+            DrawSeedControl();
+            DrawBotControlsPlayer(inSession);
             ImGui.BeginDisabled(inSession);
             ImGui.BeginGroup();
             debugMenu.DrawSpeedControl();
@@ -586,34 +645,18 @@ public unsafe class MainWindow : Window, IDisposable
     {
         var uiScale = ImGuiHelpers.GlobalScale;
         var contentStart = ImGui.GetCursorScreenPos();
-        var contentWidth = ImGui.GetContentRegionAvail().X;
-        var rowHeight = ImGui.GetFrameHeight();
         var scenario = _selectedScenario!;
-
-        var (statusLabel, statusColor) = Status(game.Paused, RunActive);
 
         DrawScenarioPanelToggle();
         ImGui.SameLine();
         ImGui.TextDisabled($"{scenario.Phase.Zone.Name} —");
         ImGui.SameLine(0f, 4f * uiScale);
-        ImGui.TextUnformatted(DisplayName(scenario));
-
-        var minimumStatusX = ImGui.GetItemRectMax().X + 12f * uiScale;
-        // Room for the widest status, or an auto-sized window whose widest row is this one would
-        // leave the overlay no space and it would not be drawn.
-        ImGui.SameLine(0f, 12f * uiScale);
-        ImGui.Dummy(new Vector2(StatusOverlayWidth(), rowHeight));
-        DrawStatusOverlay(
-            statusLabel,
-            statusColor,
-            contentStart.X + contentWidth,
-            minimumStatusX,
-            contentStart.Y,
-            rowHeight);
+        ImGui.TextUnformatted(scenario.DisplayName());
+        DrawRunStatus(game);
 
         var dividerColor = StyleColor(ImGuiCol.TextDisabled);
         dividerColor.W *= 0.35f;
-        var dividerY = contentStart.Y + rowHeight;
+        var dividerY = contentStart.Y + ImGui.GetFrameHeight();
         ImGui.GetWindowDrawList().AddLine(
             new Vector2(ImGui.GetWindowPos().X, dividerY),
             new Vector2(ImGui.GetWindowPos().X + ImGui.GetWindowSize().X, dividerY),
@@ -623,6 +666,44 @@ public unsafe class MainWindow : Window, IDisposable
             contentStart.X,
             dividerY + ImGui.GetStyle().ItemSpacing.Y));
     }
+
+    // Left-aligned after the name: a right-aligned widget isn't always given the room to draw.
+    private void DrawRunStatus(AnoMech.Core.Game.Game game)
+    {
+        var (label, color) = RunStatus(game);
+        ImGui.SameLine(0f, 8f * ImGuiHelpers.GlobalScale);
+        ImGui.TextColored(color, $"· {label}");
+        if (game.LastRun is not { Issues.Count: > 0 } run || !ImGui.IsItemHovered()) return;
+        ImGui.BeginTooltip();
+        foreach (var issue in run.Issues)
+            ImGui.TextUnformatted($"{issue.Time,6:F1}s  {issue.Description}");
+        ImGui.EndTooltip();
+    }
+
+    // The live run's state, else how the selected scenario's last run ended.
+    private (string Label, Vector4 Color) RunStatus(AnoMech.Core.Game.Game game)
+    {
+        var idle = ("Idle", StyleColor(ImGuiCol.TextDisabled));
+        if (game.LastRun is not { } run) return RunActive ? ("Running", RunningColor) : idle;
+        if (run.Ended && run.Scenario != _selectedScenario) return idle;
+        var status = run.Status;
+        if (IsFailed(status)) return ("Failed", FailedColor);
+        return status switch
+        {
+            SessionStatus.Succeeded => ("Cleared", RunningColor),
+            SessionStatus.CompletedWithMistake => ("Cleared with mistakes", MistakeColor),
+            _ when run.Ended => ("Stopped", StyleColor(ImGuiCol.TextDisabled)),
+            SessionStatus.RunningWithMistake => ("Running with mistakes", MistakeColor),
+            _ => ("Running", RunningColor),
+        };
+    }
+
+    private static bool IsFailed(SessionStatus status)
+        => status is SessionStatus.Failed or SessionStatus.Frozen or SessionStatus.CompletedFailed;
+
+    // A run still playing, as opposed to one frozen or finished and only left standing.
+    private static bool RunLive(AnoMech.Core.Game.Game game)
+        => game.Status is SessionStatus.Running or SessionStatus.RunningWithMistake or SessionStatus.Failed;
 
     private void DrawScenarioPanelToggle()
     {
@@ -673,21 +754,27 @@ public unsafe class MainWindow : Window, IDisposable
     {
         var uiScale = ImGuiHelpers.GlobalScale;
         var actionSize = new Vector2(140f * uiScale, 32f * uiScale);
-        if (RunActive)
+        if (!inSession)
+            DrawStartButton(game, actionSize);
+        else if (RunActive)
         {
             if (DrawSemanticButton("Stop", actionSize, StopColor))
-                plugin.ResetScenario();
+                plugin.Runs.Reset();
         }
-        else if (inSession)
-            multiplayerUi.DrawStartButton(actionSize);
         else
-            DrawStartButton(actionSize);
+            multiplayerUi.DrawStartButton(actionSize, Selection);
 
-        if (game.World.Map.IsInInstance)
+        if (!inSession && RunLive(game))
+        {
+            ImGui.SameLine();
+            if (DrawSemanticButton("Stop###stop", actionSize, StopRunColor))
+                plugin.Runs.Reset();
+        }
+        else if (game.World.Map.IsInInstance)
         {
             ImGui.SameLine();
             if (DrawSemanticButton(inSession ? "Return to inn###leave-instance" : "Leave###leave-instance", actionSize, StopColor))
-                plugin.LeaveInstance();
+                plugin.Runs.Leave();
             if (inSession && ImGui.IsItemHovered())
                 ImGui.SetTooltip("Takes the whole party back to the inn. Everyone stays in the session.");
         }
@@ -700,75 +787,35 @@ public unsafe class MainWindow : Window, IDisposable
     private void DrawSession()
     {
         multiplayerUi.DrawSessionStrip(PartyPanel);
-        multiplayerUi.DrawSessionMessages();
+        multiplayerUi.DrawSessionMessages(Selection);
     }
 
     // Sessions start from the inn, like any scenario.
     private void DrawMultiplayerButton(Vector2 size = default)
     {
-        if (!ZoneSession.IsInInn() || plugin.Game.World.Map.IsInInstance) return;
+#if DEBUG
+        if (!ZoneControl.IsInInn() || Plugin.Game.World.Map.IsInInstance) return;
         ImGui.SameLine();
         if (ImGui.Button("Multiplayer", size)) _showMultiplayerSetup = true;
+#endif
     }
 
     private bool SoloSelected => _selectedScenario is { SupportsSolo: true } && _soloMode;
 
-    private void DrawStartButton(Vector2 size)
+    // A start replaces whatever run is standing, so it needs no Stop first.
+    private void DrawStartButton(AnoMech.Core.Game.Game game, Vector2 size)
     {
         var solo = SoloSelected;
-        var refusal = plugin.StartRefusal(solo);
+        var selection = Selection;
+        var refusal = plugin.Runs.StartRefusal(selection, solo);
+        var restart = game.ActiveScenario is { } active && active == _selectedScenario;
+        var label = plugin.Runs.StartWaitingOn != null ? "Waiting to start..." : restart ? "Restart" : "Start";
         ImGui.BeginDisabled(refusal != null);
-        if (DrawSemanticButton($"{(plugin.Game.StartWaitingOn != null ? "Waiting to start..." : "Start")}###start", size, StartColor))
-            plugin.StartSelectedScenario(solo);
+        if (DrawSemanticButton($"{label}###start", size, StartColor))
+            plugin.Runs.Start(selection, solo);
         ImGui.EndDisabled();
         if (refusal != null && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
             ImGui.SetTooltip(refusal);
-    }
-
-    private static (string Label, Vector4 Color) Status(bool paused, bool active) =>
-        paused ? ("Paused", PausedColor)
-        : active ? ("Running", RunningColor)
-        : ("Idle", StyleColor(ImGuiCol.TextDisabled));
-
-    // DrawStatusOverlay's dot, gap and widest label.
-    private static float StatusOverlayWidth()
-    {
-        var widestLabel = MathF.Max(
-            ImGui.CalcTextSize(Status(true, false).Label).X,
-            MathF.Max(ImGui.CalcTextSize(Status(false, true).Label).X, ImGui.CalcTextSize(Status(false, false).Label).X));
-        return 10f * ImGuiHelpers.GlobalScale + widestLabel;
-    }
-
-    private static void DrawStatusOverlay(
-        string label,
-        Vector4 color,
-        float right,
-        float minimumX,
-        float top,
-        float height)
-    {
-        var uiScale = ImGuiHelpers.GlobalScale;
-        var radius = 3f * uiScale;
-        var diameter = radius * 2f;
-        var gap = 4f * uiScale;
-        var textSize = ImGui.CalcTextSize(label);
-        var fullWidth = diameter + gap + textSize.X;
-        var x = right - fullWidth;
-        var drawLabel = x >= minimumX;
-        if (!drawLabel)
-            x = right - diameter;
-        if (x < minimumX) return;
-
-        var drawList = ImGui.GetWindowDrawList();
-        drawList.AddCircleFilled(
-            new Vector2(x + radius, top + height * 0.5f),
-            radius,
-            ImGui.GetColorU32(color));
-        if (drawLabel)
-            drawList.AddText(
-                new Vector2(x + diameter + gap, top + (height - textSize.Y) * 0.5f),
-                ImGui.GetColorU32(color),
-                label);
     }
 
     private static bool DrawSemanticButton(string label, Vector2 size, Vector4 color)
@@ -813,7 +860,7 @@ public unsafe class MainWindow : Window, IDisposable
     }
 
     private bool ZoneContains(IZone zone, IScenario? scenario) =>
-        scenario != null && plugin.Game.PhasesOf(zone).Any(p => plugin.Game.ScenariosOf(p).Contains(scenario));
+        scenario != null && Plugin.Game.Catalog.PhasesOf(zone).Any(p => Plugin.Game.Catalog.ScenariosOf(p).Contains(scenario));
 
     private static Vector4 StyleColor(ImGuiCol color) => *ImGui.GetStyleColorVec4(color);
 
@@ -829,18 +876,19 @@ public unsafe class MainWindow : Window, IDisposable
     private void DrawSoloOption(AnoMech.Core.Game.Game game)
     {
         if (!_selectedScenario!.SupportsSolo) return;
-        ImGui.BeginDisabled(game.IsScenarioActive);
+        var running = RunLive(game);
+        ImGui.BeginDisabled(running);
         ImGui.Checkbox("Solo", ref _soloMode);
         ImGui.EndDisabled();
         if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-            ImGui.SetTooltip(game.IsScenarioActive
+            ImGui.SetTooltip(running
                 ? "Stop the current scenario before changing the run mode."
                 : "Run without simulated party members or party AI.");
     }
 
     // God mode and auto-restart are disabled while a session is being set up or is live; forced
     // off, not just disabled, so a stale value can't apply.
-    private static void DrawRunOptions(AnoMech.Core.Game.Game game, bool mpActive)
+    private static void DrawRunOptions(AnoMech.Core.Game.Game game, PracticeLoop practice, bool mpActive)
     {
         ImGui.Spacing();
         if (mpActive) game.GodMode = false;
@@ -852,17 +900,17 @@ public unsafe class MainWindow : Window, IDisposable
             ImGui.SetTooltip(MpDisabledReason);
         ImGui.SameLine();
         // A host rerunning on its own would desync the session, so this is solo-only.
-        if (mpActive) game.AutoRestart = false;
+        if (mpActive) practice.AutoRestart = false;
         ImGui.BeginDisabled(mpActive);
-        var autoRestart = game.AutoRestart;
-        if (ImGui.Checkbox("Auto-restart", ref autoRestart)) game.AutoRestart = autoRestart;
+        var autoRestart = practice.AutoRestart;
+        if (ImGui.Checkbox("Auto-restart", ref autoRestart)) practice.AutoRestart = autoRestart;
         ImGui.EndDisabled();
         if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
             ImGui.SetTooltip(mpActive
                 ? MpDisabledReason
-                : "Restart the same scenario immediately after a successful run. A death turns this back off.");
+                : "Restart the same scenario immediately after a successful run. A failed run turns this back off.");
         ImGui.SameLine();
-        ImGui.TextDisabled($"Streak: {game.MechanicStreak}");
+        ImGui.TextDisabled($"Streak: {practice.Streak}");
     }
 
     // Drawn below the strat picker for scenarios that declare WaymarkPresets. _selectedWaymark
@@ -883,8 +931,8 @@ public unsafe class MainWindow : Window, IDisposable
         if (ImGui.Combo("##waymarks", ref _selectedWaymark, labels, labels.Length))
         {
             _waymarkMemory[_selectedScenario.Phase.Zone] = _selectedWaymark;
-            if (plugin.Game.World.Map.IsInInstance)
-                plugin.Game.World.PlaceWaymarks(presets[_selectedWaymark].Markers);
+            if (Plugin.Game.World.Map.IsInInstance)
+                Plugin.Game.World.PlaceWaymarks(presets[_selectedWaymark].Markers);
         }
     }
 
@@ -959,9 +1007,8 @@ public unsafe class MainWindow : Window, IDisposable
             _selectedStrat = filtered[localIdx];
     }
 
-    // Grouped scenarios need a real strat in the active region. Also the host's pre-broadcast
-    // check in MultiplayerManager.StartScenario.
-    internal bool HasStartableStrat()
+    // Grouped scenarios need a real strat in the active region.
+    private bool HasStartableStrat()
     {
         if (_selectedScenario is not { } scenario) return false;
         if (StratGroups(scenario).Count == 0) return true;
@@ -980,7 +1027,7 @@ public unsafe class MainWindow : Window, IDisposable
 
     private void DrawLocationHint()
     {
-        if (ZoneSession.IsInInn()) return;
+        if (ZoneControl.IsInInn()) return;
         ImGui.TextDisabled("Scenarios only run in an inn");
         ImGui.SameLine();
         ImGuiComponents.HelpMarker("Scenarios can only be started from an inn — return to one to run a scenario.");

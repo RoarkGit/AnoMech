@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Linq;
 using AnoMech.Core.Game.Party;
 using AnoMech.Core.SimObjects;
 
@@ -6,7 +7,7 @@ namespace AnoMech.Scenarios.Top.P2PartySynergy;
 
 public class TopP2PartySynergyState
 {
-    private readonly Rng rng = new();
+    private readonly Rng rng = Rng.Detached;
 
     public Direction NewNorthA { get; }
     public Direction NewNorthB { get; }
@@ -17,16 +18,26 @@ public class TopP2PartySynergyState
     public OmegaAttack AttackM { get; }
     public OmegaAttack AttackF { get; }
 
-    public TopP2PartySynergyState(SimParty party, TopP2PartySynergyStateOverrides overrides)
+    public TopP2PartySynergyState(Rng rng, SimParty party, TopP2PartySynergyStateOverrides overrides)
     {
+        this.rng = rng;
         NewNorthA = overrides.NewNorthA ?? rng.NextDirection();
         NewNorthB = overrides.NewNorthB ?? rng.NextDirection();
-        Order = RoleList.Random(party);
-        Stacks = RoleList.Random(party, 2);
+        Order = new RoleListBuilder
+        {
+            Slots = overrides.Symbol.Resolve(party.PlayerRole)
+                             .ToDictionary(r => r.Role, r => new[] { 2 * (int)r.Value, 2 * (int)r.Value + 1 }),
+        }.Build(rng, party);
+        Stacks = new RoleListBuilder
+        {
+            Size = 2,
+            Membership = overrides.Stack.Resolve(party.PlayerRole).ToDictionary(r => r.Role, r => r.Value),
+        }.Build(rng, party);
         Glitch = overrides.Glitch ?? rng.NextObj(GlitchType.Far, GlitchType.Mid);
         AttackM = overrides.AttackM ?? rng.NextObj(OmegaAttack.Sword, OmegaAttack.Shield);
         AttackF = overrides.AttackF ?? rng.NextObj(OmegaAttack.Staff, OmegaAttack.Legs);
-        AttackDir = rng.NextDirection().RotateRad(MathF.Tau / 16);
+        var attackDir = rng.NextDirection().RotateRad(MathF.Tau / 16);
+        AttackDir = overrides.AttackDir ?? attackDir;
     }
 
     // Network-replay constructor: reconstructs the fields TopP2PartySynergyAi reads -- all of
