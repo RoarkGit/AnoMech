@@ -26,7 +26,10 @@ public sealed class DsrP3NidhoggScenario : IScenario
         [new DsrP3NidhoggAi(DsrP3NidhoggAi.ArrowFacing.West), new DsrP3NidhoggAi(DsrP3NidhoggAi.ArrowFacing.East)];
 
     public void DrawSettings() => settingsWindow.Draw();
+    public bool HasPerPlayerSettings => true;
+    public void DrawPerPlayerSettings() => settingsWindow.DrawPerPlayer();
     public object SettingsOverrides => settingsWindow.Overrides;
+    public IReadOnlyList<string> SettingsConflicts => settingsWindow.Overrides.Validate().Problems;
     private readonly DsrP3NidhoggSettingsWindow settingsWindow = new();
 
     private static readonly ushort[] OrderStatus = [StatusId.FirstInLine, StatusId.SecondInLine, StatusId.ThirdInLine];
@@ -42,7 +45,7 @@ public sealed class DsrP3NidhoggScenario : IScenario
     public void Run(SimWorld worldParam, int? selectedAi)
     {
         world = worldParam;
-        state = new DsrP3NidhoggState(world.Rng, settingsWindow.Overrides);
+        state = new DsrP3NidhoggState(world.Rng, world.Party.PlayerRole, settingsWindow.Overrides);
         jumpClones.Clear();
         diveClones.Clear();
         counterClones.Clear();
