@@ -2,8 +2,8 @@
 <Project Sdk="Dalamud.NET.Sdk/15.0.0">
 
   <PropertyGroup>
-    <Authors>Anomek</Authors>
-    <Version>0.5.1.3</Version>
+    <Authors>Liam Galt</Authors>
+    <Version>0.5.1.4</Version>
     <Description>Simulate ultimate raid mechanics solo client-side</Description>
     <RootNamespace>AnoMech</RootNamespace>
     <PackageProjectUrl>https://github.com/anomek/AnoMech</PackageProjectUrl>
