@@ -65,6 +65,36 @@ public sealed class DsrP3NidhoggState
         TetherTower = rng.Next(4);
     }
 
+    private DsrP3NidhoggState(
+        IReadOnlyDictionary<PartyRole, int> order, IReadOnlyDictionary<PartyRole, JumpKind> jump, IReadOnlySet<int> ordersWithArrows,
+        IReadOnlyList<bool> outFirst, IReadOnlyList<int> counterTowerSoakers, int tetherTower)
+    {
+        Order = order;
+        Jump = jump;
+        OrdersWithArrows = ordersWithArrows;
+        OutFirst = outFirst;
+        CounterTowerSoakers = counterTowerSoakers;
+        TetherTower = tetherTower;
+    }
+
+    // Null unless the host's roll is one this fight can deal.
+    public static DsrP3NidhoggState? FromNetworkReplay(
+        IReadOnlyDictionary<PartyRole, int> order, IReadOnlyDictionary<PartyRole, JumpKind> jump, int[] ordersWithArrows,
+        bool[] outFirst, int[] counterTowerSoakers, int tetherTower)
+    {
+        var arrows = ordersWithArrows.ToHashSet();
+        if (!ArrowPatterns.Any(p => arrows.SetEquals(p))) return null;
+        if (outFirst.Length != 2 || tetherTower is < 0 or > 3) return null;
+        if (!CounterTowerShapes.Any(shape => shape.Order().SequenceEqual(counterTowerSoakers.Order()))) return null;
+        var roles = Enum.GetValues<PartyRole>();
+        if (order.Count != roles.Length || jump.Count != roles.Length || !roles.All(r => order.ContainsKey(r) && jump.ContainsKey(r))) return null;
+        var dealt = roles.Select(r => (order[r], jump[r])).Order();
+        if (!dealt.SequenceEqual(Slots(arrows, null).Order())) return null;
+        return new DsrP3NidhoggState(
+            new Dictionary<PartyRole, int>(order), new Dictionary<PartyRole, JumpKind>(jump), arrows,
+            outFirst.ToList(), counterTowerSoakers.ToList(), tetherTower);
+    }
+
     public static int OrderSize(int order) => order == 2 ? 2 : 3;
 
     // Whether some roll gives every picked seat its number and jump, under the forced arrows if any.

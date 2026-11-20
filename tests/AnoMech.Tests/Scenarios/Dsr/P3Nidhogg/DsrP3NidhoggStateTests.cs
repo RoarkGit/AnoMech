@@ -1,4 +1,6 @@
+using System.Text.Json;
 using AnoMech.Core.Game.Party;
+using AnoMech.Multiplayer;
 using AnoMech.Scenarios;
 using AnoMech.Scenarios.Dsr.P3Nidhogg;
 using static AnoMech.Core.Game.Party.PartyRole;
@@ -101,6 +103,39 @@ public class DsrP3NidhoggStateTests
         foreach (var seed in Seeds)
             ExpectValidDeal(new DsrP3NidhoggState(new Rng(seed), MainTank, new DsrP3NidhoggStateOverrides()), seed);
     }
+
+    [Test]
+    public void HostRollSurvivesTheWireAndReplaysAsDealt()
+    {
+        foreach (var seed in Seeds.Take(20))
+        {
+            var host = new DsrP3NidhoggState(new Rng(seed), MainTank, new DsrP3NidhoggStateOverrides());
+            var msg = (DsrP3NidhoggAiReplayStateMessage)JsonSerializer.Deserialize<MpMessage>(JsonSerializer.Serialize<MpMessage>(ReplayMessage(host)))!;
+            var replayed = DsrP3NidhoggState.FromNetworkReplay(msg.Order, msg.Jump, msg.OrdersWithArrows, msg.OutFirst, msg.CounterTowerSoakers, msg.TetherTower);
+            Assert.That(replayed, Is.Not.Null, $"seed {seed}");
+            Assert.That(replayed!.Order, Is.EquivalentTo(host.Order), $"seed {seed}");
+            Assert.That(replayed.Jump, Is.EquivalentTo(host.Jump), $"seed {seed}");
+            Assert.That(replayed.OrdersWithArrows, Is.EquivalentTo(host.OrdersWithArrows), $"seed {seed}");
+            Assert.That(replayed.OutFirst, Is.EqualTo(host.OutFirst), $"seed {seed}");
+            Assert.That(replayed.CounterTowerSoakers, Is.EqualTo(host.CounterTowerSoakers), $"seed {seed}");
+            Assert.That(replayed.TetherTower, Is.EqualTo(host.TetherTower), $"seed {seed}");
+        }
+    }
+
+    [Test]
+    public void ReplayRefusesADealTheFightCantMake()
+    {
+        var msg = ReplayMessage(new DsrP3NidhoggState(new Rng(1), MainTank, new DsrP3NidhoggStateOverrides()));
+        var jump = new Dictionary<PartyRole, JumpKind>(msg.Jump);
+        foreach (var role in jump.Keys.ToList()) jump[role] = JumpKind.Forward;
+        Assert.That(DsrP3NidhoggState.FromNetworkReplay(msg.Order, jump, msg.OrdersWithArrows, msg.OutFirst, msg.CounterTowerSoakers, msg.TetherTower), Is.Null);
+        Assert.That(DsrP3NidhoggState.FromNetworkReplay(msg.Order, msg.Jump, [1, 2, 3], msg.OutFirst, msg.CounterTowerSoakers, msg.TetherTower), Is.Null);
+        Assert.That(DsrP3NidhoggState.FromNetworkReplay(msg.Order, msg.Jump, msg.OrdersWithArrows, msg.OutFirst, [4, 4, 0, 0], msg.TetherTower), Is.Null);
+    }
+
+    private static DsrP3NidhoggAiReplayStateMessage ReplayMessage(DsrP3NidhoggState s)
+        => new(new Dictionary<PartyRole, int>(s.Order), new Dictionary<PartyRole, JumpKind>(s.Jump), s.OrdersWithArrows.ToArray(),
+            s.OutFirst.ToArray(), s.CounterTowerSoakers.ToArray(), s.TetherTower);
 
     private static void ExpectValidDeal(DsrP3NidhoggState state, int seed)
     {

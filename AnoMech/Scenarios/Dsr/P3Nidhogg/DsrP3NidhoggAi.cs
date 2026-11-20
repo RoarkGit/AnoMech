@@ -332,27 +332,10 @@ public sealed class DsrP3NidhoggAi(DsrP3NidhoggAi.ArrowFacing arrowFacing) : ISc
     private static int NearestCounterTower(Vector3 position)
         => Enumerable.Range(0, 4).MinBy(i => Vector3.DistanceSquared(DsrP3NidhoggState.CounterTower(i), position));
 
-    private int[] SoakersShownOnCounterTowers()
-    {
-        var soakers = new[] { 2, 2, 2, 2 };
-        foreach (var clone in Clones())
-        {
-            var shown = Array.IndexOf(DsrConstants.ActionId.DarkdragonDiveForSoakers, clone.CastActionId);
-            if (shown >= 0) soakers[NearestCounterTower(clone.Position)] = shown + 1;
-        }
-        return soakers;
-    }
-
-    private int? TetheredCounterTower()
-    {
-        var boss = Nidhogg();
-        return state.SoulTethers.Where(t => !ReferenceEquals(t.Source, boss)).Select(t => (int?)NearestCounterTower(t.Source.Position)).FirstOrDefault();
-    }
-
     private void AssignCounterTowers()
     {
         counterTower = new Dictionary<PartyRole, int>(HomeCounterTower);
-        var soakers = SoakersShownOnCounterTowers();
+        var soakers = state.CounterTowerSoakers;
         var leavers = new List<PartyRole>();
         for (var tower = 0; tower < 4; tower++)
             if (soakers[tower] == 1)
@@ -381,7 +364,7 @@ public sealed class DsrP3NidhoggAi(DsrP3NidhoggAi.ArrowFacing arrowFacing) : ISc
     private void AssignCounterBaits()
     {
         if (counterTower.Count == 0) AssignCounterTowers();
-        var tethered = TetheredCounterTower();
+        var tethered = state.TetherTower;
         var spots = Enumerable.Range(0, 4).Where(t => t != tethered)
             .Select(t => At(Compass.BearingOf(DsrP3NidhoggState.CounterTower(t)), CounterBaitRadius)).ToList();
         var candidates = Enum.GetValues<PartyRole>().Where(r => !IsTank(r) && world.Party.Get(r) is { } m && m.IsAlive()).ToList();
