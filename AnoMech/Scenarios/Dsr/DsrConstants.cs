@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 using AnoMech.Core.Game;
+using AnoMech.Core.SimObjects;
 
 namespace AnoMech.Scenarios.Dsr;
 
@@ -13,6 +14,8 @@ public static class DsrConstants
     {
         // P3 is a square: players reach 20y along either axis but 25y out to the corners.
         public const float P3ArenaHalfWidth = 21f;
+        public static readonly Vector3 LeftEye = new(10f, 0f, 0f);
+        public static readonly Vector3 RightEye = new(-10f, 0f, 0f);
     }
 
     // A-D on the cardinals, 1-4 on the intercardinals clockwise from NW.
@@ -31,18 +34,34 @@ public static class DsrConstants
     public static class BgmId
     {
         public const ushort Freefall = 922;
+        public const ushort Contention = 923;
     }
 
     public static class BNpcBaseId
     {
         public const uint NidhoggP3 = 12605;
         public const uint NidhoggClone = 12606;
+        public const uint AzurePrice = 12607;
+        public const uint GildedPrice = 12608;
+        public const uint LeftEye = 12609;
+        public const uint RightEye = 12610;
+        public const uint Haurchefant = 13117;
+        public const uint Ysayle = 13118;
+        public const uint Estinien = 13119;
     }
 
     public static class BNpcNameId
     {
         // The boss and its clones are both named Nidhogg.
         public const uint Nidhogg = 3458;
+        // UNVERIFIED: the sheet has no DSR-era Haurchefant row; this is his oldest one.
+        public const uint Haurchefant = 1455;
+        public const uint Estinien = 11312;
+        public const uint Ysayle = 11313;
+        public const uint AzurePrice = 11315;
+        public const uint GildedPrice = 11316;
+        public const uint LeftEye = 11317;
+        public const uint RightEye = 11318;
     }
 
     public static class ActionId
@@ -67,6 +86,20 @@ public static class DsrConstants
         public const uint DarkdragonDiveFail = 0x671B;
         public const uint SoulTether = 0x671C;
         public const uint RevengeOfTheHorde = 0x7436;
+
+        public const uint EyesAppear = 0x717A;
+        public const uint Resentment = 0x68BA;
+        public const uint EyeAutoAttack = 0x68BB;
+        public const uint SteepInRage = 0x68BD;
+        public const uint Hatebound = 0x68BE;
+        public const uint FlareStar = 0x68BF;
+        public const uint FlareStarUnpopped = 0x68C0;
+        public const uint FlareNova = 0x68C1;
+        public const uint FlareNovaUnpopped = 0x68C2;
+        public const uint MirageDiveCast = 0x68C3;
+        public const uint MirageDive = 0x68C4;
+        public const uint SoulOfFriendship = 0x68C5;
+        public const uint SoulOfDevotion = 0x68C6;
     }
 
     public static class StatusId
@@ -79,6 +112,13 @@ public static class DsrConstants
         public const ushort ElusiveJumpTarget = 2757;
         public const ushort FireResistanceDownII = 2902;
         public const ushort PhysicalVulnerabilityUp = 2940;
+        public const ushort SoulOfFriendship = 2748;
+        public const ushort SoulOfDevotion = 2749;
+        public const ushort Clawbound = 2775;
+        public const ushort Fangbound = 2776;
+        public const ushort BoundAndDetermined = 2777;
+        public const ushort Bleeding = 2951;
+        public const ushort PiercingResistanceDown = 3131;
     }
 
     public static class LockonId
@@ -91,6 +131,23 @@ public static class DsrConstants
     public static class TetherId
     {
         public const ushort SoulTether = 84;
+        public const ushort Fangbound = 51;
+        public const ushort Clawbound = 52;
+    }
+
+    // Spawn-packet parts for P4's human models, from their BNpcBase rows' NpcEquip and
+    // BNpcCustomize; without them the client draws a bare body.
+    public static class Appearance
+    {
+        public static readonly NpcAppearance Haurchefant = new(MainHand: 0x5000100CA, OffHand: 0x200090065,
+            Equipment: [0x0, 0x9C000F, 0xB6000B, 0x46000F, 0xA0000F],
+            Customize: [0x02, 0x00, 0x01, 0x4B, 0x03, 0x02, 0x02, 0x01, 0x00, 0x92, 0x9A, 0x19, 0x60, 0x06, 0x02, 0x92, 0x02, 0x05, 0x03, 0x00, 0x00, 0x32, 0x01, 0x32]);
+        public static readonly NpcAppearance Ysayle = new(MainHand: 0x1400010385,
+            Equipment: [0x0, 0x1237C, 0x60078, 0x50077, 0x60078],
+            Customize: [0x02, 0x01, 0x01, 0x32, 0x04, 0xCA, 0xCA, 0x01, 0x58, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x80, 0xC3, 0x32, 0x01, 0x32]);
+        public static readonly NpcAppearance Estinien = new(MainHand: 0x100011F49,
+            Equipment: [0x22391, 0x1239B, 0x1239B, 0x70024, 0x70024],
+            Customize: [0x02, 0x00, 0x01, 0x32, 0x03, 0xD0, 0x05, 0x01, 0x4A, 0x06, 0xA1, 0x00, 0x00, 0x01, 0x02, 0x06, 0x81, 0x04, 0x00, 0x01, 0x00, 0x32, 0x01, 0x32, 0x00, 0x01]);
     }
 }
 

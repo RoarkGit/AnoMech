@@ -113,4 +113,68 @@ public static class DsrActions
         Timing = new() { DamageDelay = 1.16f },
         DeathExplanation = "Soul Tether is a tank buster on whoever holds the tether",
     };
+
+    public static readonly EnemyAction SoulOfFriendship = new(ActionId.SoulOfFriendship)
+    {
+        Effects = [ApplyStatus(StatusId.SoulOfFriendship, 90f)],
+        Timing = new() { DamageDelay = 0f },
+    };
+
+    public static readonly EnemyAction SoulOfDevotion = new(ActionId.SoulOfDevotion)
+    {
+        Effects = [ApplyStatus(StatusId.SoulOfDevotion, 90f)],
+        Timing = new() { DamageDelay = 0f },
+    };
+
+    // Each orb burns whoever it hits; a second orb on someone still burning kills them.
+    private static readonly VulnSpec Scorched = VulnerableTo(StatusId.FireResistanceDownII);
+
+    public static readonly EnemyAction EyeAutoAttack = new(ActionId.EyeAutoAttack)
+    {
+        Effects = [Damage()],
+        Timing = new() { DamageDelay = 0.8f },
+    };
+
+    public static readonly EnemyAction Resentment = new(ActionId.Resentment)
+    {
+        Effects = [Damage(), ApplyStatus(StatusId.Bleeding, 6f)],
+        Timing = new() { DamageDelay = 1.3f },
+    };
+
+    public static readonly EnemyAction FlareNova = new(ActionId.FlareNova)
+    {
+        Effects = [Damage(Scorched), ApplyStatus(StatusId.FireResistanceDownII, 12f)],
+        Timing = new() { DamageDelay = 0.8f },
+        DeathExplanation = "hit by a second orb while still burning from the first",
+    };
+
+    public static readonly EnemyAction FlareStar = new(ActionId.FlareStar)
+    {
+        Effects = [Damage(Scorched), ApplyStatus(StatusId.FireResistanceDownII, 12f)],
+        Timing = new() { DamageDelay = 0.27f },
+        DeathExplanation = "hit by a second orb while still burning from the first",
+    };
+
+    private static EnemyAction UnpoppedOrb(uint actionId) => new(actionId)
+    {
+        Effects = [Damage(Scorched), ApplyStatus(StatusId.FireResistanceDownII, 12f)],
+        Timing = new() { DamageDelay = 0.8f },
+        DeathExplanation = "an orb went unpopped and burst over the whole arena while you were still burning",
+    };
+
+    public static readonly EnemyAction FlareNovaUnpopped = UnpoppedOrb(ActionId.FlareNovaUnpopped);
+    public static readonly EnemyAction FlareStarUnpopped = UnpoppedOrb(ActionId.FlareStarUnpopped);
+
+    public static readonly EnemyAction MirageDive = new(ActionId.MirageDive)
+    {
+        Effects = [Damage(VulnerableTo(StatusId.PiercingResistanceDown)), ApplyStatus(StatusId.PiercingResistanceDown, 13f)],
+        Timing = new() { DamageDelay = 0.58f },
+        DeathExplanation = "hit by a Mirage Dive while still pierced by an earlier one",
+    };
+
+    public static readonly EnemyAction SteepInRage = new(ActionId.SteepInRage)
+    {
+        Effects = [Damage()],
+        Timing = new() { DamageDelay = 0.94f },
+    };
 }

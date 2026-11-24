@@ -13,6 +13,9 @@ public sealed class DsrZone : IZone
     // only under its own weathers. 66 shows P3's square r1fz_e00 floor.
     public static readonly Phase P3 = new(Instance, "P3", 66, DsrConstants.BgmId.Freefall,
         init: world => world.EnforceSquareArenaBoundary(DsrConstants.Geometry.P3ArenaHalfWidth, "Went past the arena's edge."));
+    // The eyes fight on P3's square floor. UNVERIFIED: P4's weather, taken to carry on from P3.
+    public static readonly Phase P4 = new(Instance, "P4", 66, DsrConstants.BgmId.Contention,
+        init: world => world.EnforceSquareArenaBoundary(DsrConstants.Geometry.P3ArenaHalfWidth, "Went past the arena's edge."));
 
     public string Name => "Dragonsong's Reprise";
     public uint TerritoryId => 968;
