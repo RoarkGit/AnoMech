@@ -35,13 +35,13 @@ public sealed class DsrP4EyesScenario : IMultiplayerReplayable
     private const float SwapsOpenAt = 21.3f;
     // UNVERIFIED: how close two players come to trade tethers; they have to all but stand on each
     // other. The trade goes through a moment after they touch, even if they part again.
-    private const float SwapRadius = 0.6f;
+    private const float SwapRadius = 0.3f;
     // The host sees a remote player where they stood a network delay ago, so two players who touch
     // on their own screens can still be apart on the host's. UNVERIFIED: enough for usual latency.
-    private const float RemoteSwapRadius = 1f;
+    private const float RemoteSwapRadius = 0.6f;
     private const float SwapDelay = 0.5f;
-    // The host also learns of the touch late, so the trade waits less once it does.
-    private const float RemoteSwapDelay = 0.2f;
+    // The host learns of the touch a network delay late, which already stands in for the wait.
+    private const float RemoteSwapDelay = 0f;
     private const float BoundAndDeterminedSeconds = 3f;
     // Each colour's orbs grow ready together; a ready orb pops on the first player to touch it,
     // hitting everyone around the orb, and bursts over the whole arena at its deadline if nobody
