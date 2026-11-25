@@ -69,6 +69,7 @@ public sealed class DsrP3NidhoggAi(DsrP3NidhoggAi.ArrowFacing arrowFacing) : ISc
     private SimWorld world = null!;
     private Dictionary<PartyRole, int> counterTower = new();
     private Dictionary<PartyRole, Vector3> counterBait = new();
+    private Dictionary<PartyRole, Vector3> sentTo = new();
     private Dictionary<PartyRole, int> claimedSide = new();
     private bool sidesLocked;
     private Dictionary<PartyRole, Vector3> planned = new();
@@ -81,6 +82,7 @@ public sealed class DsrP3NidhoggAi(DsrP3NidhoggAi.ArrowFacing arrowFacing) : ISc
         world = worldParam;
         counterTower = new();
         counterBait = new();
+        sentTo = new();
         claimedSide = new();
         sidesLocked = false;
         planned = new();
@@ -117,8 +119,8 @@ public sealed class DsrP3NidhoggAi(DsrP3NidhoggAi.ArrowFacing arrowFacing) : ISc
         ai.Move(63.7f, () => ByRole(role => role == PartyRole.MainTank ? TankSpot() : At(NorthWest, WestIdleRadius)), arrivalTime: 65.5f, leaveNow: true);
 
         ai.Move(68.2f, () => ByRole(role => role == PartyRole.MainTank ? null : AcrossFromMainTank()));
-        ai.Move(70.2f, () => ByRole(role => role == PartyRole.MainTank ? null : BehindNidhogg()), sprint: true);
-        ai.Move(70.3f, () => ByRole(role => role == PartyRole.MainTank ? BehindNidhogg() : null), sprint: true);
+        ai.Move(70.6f, () => ByRole(role => role == PartyRole.MainTank ? null : BehindNidhogg()), sprint: true);
+        ai.Move(70.7f, () => ByRole(role => role == PartyRole.MainTank ? BehindNidhogg() : null), sprint: true);
         ai.Move(73.8f, () => ByRole(HomeCounterTowerSpot), arrivalTime: 76.5f, leaveNow: true);
         ai.Move(75.6f, () => ByRole(CounterTowerSoak), arrivalTime: 79.8f, leaveNow: true);
         ai.Move(80.2f, () => ByRole(TakeTetherOrBaitOrWait), arrivalTime: 82.5f, leaveNow: true);
@@ -360,7 +362,9 @@ public sealed class DsrP3NidhoggAi(DsrP3NidhoggAi.ArrowFacing arrowFacing) : ISc
     {
         if (IsTank(role)) return TakeTether(role);
         if (counterBait.Count == 0) AssignCounterBaits();
-        return counterBait.TryGetValue(role, out var bait) ? bait : BehindNidhogg();
+        var spot = counterBait.TryGetValue(role, out var bait) ? bait : At(South, CleaveDodgeRadius);
+        sentTo[role] = spot;
+        return spot;
     }
 
     private void AssignCounterBaits()
@@ -387,10 +391,13 @@ public sealed class DsrP3NidhoggAi(DsrP3NidhoggAi.ArrowFacing arrowFacing) : ISc
         var me = world.Party.Get(role);
         if (tether.B is { } holder && ReferenceEquals(holder, me))
             return index == 0 ? TankSpot() : At(Compass.BearingOf(source.Position), CounterBaitRadius);
-        var toward = tether.B is { } current ? current.Position - source.Position : Vector3.Zero;
+        var toward = tether.B is { } current ? HeadingFor(current) - source.Position : Vector3.Zero;
         toward.Y = 0f;
         return toward.LengthSquared() < 0.01f ? source.Position : source.Position + Vector3.Normalize(toward) * InterceptDistance;
     }
+
+    private Vector3 HeadingFor(SimCharacter member) =>
+        member is ISimPartyMember { Role: var role } && sentTo.TryGetValue(role, out var spot) ? spot : member.Position;
 
     private IEnumerable<Vector3> DiveTowers(int order) => state.DiveTowers.GetValueOrDefault(order) ?? [];
 

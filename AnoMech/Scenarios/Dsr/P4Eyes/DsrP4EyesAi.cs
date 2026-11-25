@@ -67,6 +67,7 @@ public sealed class DsrP4EyesAi : IScenarioAi<DsrP4EyesState>
     private static readonly float[] DiveTimes = [45.51f, 50.63f, 55.75f, 60.87f];
 
     private SimWorld world = null!;
+    private DsrP4EyesState state = null!;
     private readonly List<PartyRole> takeOverQueue = new();
     private readonly Dictionary<PartyRole, int> takingOver = new();
     private readonly Dictionary<PartyRole, int> firstDivedSpots = new();
@@ -74,6 +75,7 @@ public sealed class DsrP4EyesAi : IScenarioAi<DsrP4EyesState>
     public void Run(DsrP4EyesState state, SimWorld worldParam)
     {
         world = worldParam;
+        this.state = state;
         takeOverQueue.Clear();
         takeOverQueue.AddRange([PartyRole.MainTank, PartyRole.OffTank, PartyRole.MeleeDpsA, PartyRole.MeleeDpsB]);
         takingOver.Clear();
@@ -106,7 +108,7 @@ public sealed class DsrP4EyesAi : IScenarioAi<DsrP4EyesState>
         world.Party.Get(role) is { } member && member.IsAlive() ? member : null;
 
     private bool HasWrongColor(PartyRole role) =>
-        Alive(role) is { } member && member.HasStatus(StatusId.Clawbound) != IsTankOrMelee(role);
+        Alive(role) != null && state.ClawboundAtStart.Contains(role) != IsTankOrMelee(role);
 
     private static bool IsGroupOne(PartyRole role) =>
         role is PartyRole.MainTank or PartyRole.RegenHealer or PartyRole.MeleeDpsA or PartyRole.PhysRangedDps;
@@ -125,7 +127,7 @@ public sealed class DsrP4EyesAi : IScenarioAi<DsrP4EyesState>
     {
         var divedBySpot = Enum.GetValues<PartyRole>()
             .Select(role => (role, member: Alive(role)))
-            .Where(e => e.member is { } m && m.HasStatus(StatusId.Clawbound) && m.HasStatus(StatusId.PiercingResistanceDown))
+            .Where(e => e.member != null && state.Has(e.role, BoundStatus.Clawbound) && state.Has(e.role, BoundStatus.PiercingResistanceDown))
             .Select(e => (e.role, member: e.member!, spot: DiveSpotOf(e.member!)))
             .Where(e => e.spot != null)
             .ToDictionary(e => e.spot!.Value, e => (e.role, e.member));
@@ -164,7 +166,7 @@ public sealed class DsrP4EyesAi : IScenarioAi<DsrP4EyesState>
     }
 
     private Vector3? LeaveSpotOnceFangbound(PartyRole role) =>
-        Alive(role) is { } member && member.HasStatus(StatusId.Fangbound) && DiveSpotOf(member) != null
+        Alive(role) is { } member && state.Has(role, BoundStatus.Fangbound) && DiveSpotOf(member) != null
             ? RightEyeStack
             : null;
 

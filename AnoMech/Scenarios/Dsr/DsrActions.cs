@@ -1,5 +1,6 @@
 using System;
 using AnoMech.Core.EnemyActions;
+using AnoMech.Core.Native.Interfaces;
 using static AnoMech.Core.EnemyActions.Distribution;
 using static AnoMech.Core.EnemyActions.EnemyActionEffects;
 using static AnoMech.Core.EnemyActions.Severity;
@@ -100,8 +101,10 @@ public static class DsrActions
         DeathExplanation = "in a Geirskogul line; each is aimed at whoever is closest to its clone when it starts",
     };
 
+    // Sent with no cast bar, so the client draws no omen; the scenario fires it when the bar would end.
     public static readonly EnemyAction DrachenlanceCleave = new(ActionId.DrachenlanceCleave)
     {
+        Cast = new() { CastSecondsOverride = 0f },
         Area = new() { Size = MathF.PI / 4f },
         Effects = [Damage(Lethal)],
         DeathExplanation = "in front of Nidhogg for Drachenlance",
@@ -176,5 +179,84 @@ public static class DsrActions
     {
         Effects = [Damage()],
         Timing = new() { DamageDelay = 0.94f },
+    };
+
+    public static readonly EnemyAction TwistingDive = new(ActionId.TwistingDive)
+    {
+        Effects = [Damage(Lethal)],
+        Timing = new() { DamageDelay = 0.5f },
+        DeathExplanation = "stood in Vedrfolnir's Twisting Dive through the middle",
+    };
+
+    // Only one Twister at a time catches a player; it throws them out of the fight.
+    public static readonly EnemyAction TwisterBurst = new(ActionId.Twister)
+    {
+        Area = new() { CastTypeOverride = CastType.SingleTarget },
+        Effects = [Damage(Lethal)],
+        DeathExplanation = "walked into a Twister; step off your spot as Twisting Dive lands and don't walk back through it",
+    };
+
+    private static readonly IEnemyActionEffect[] MagicVulnOnTarget =
+    [
+        OnTarget(Damage(VulnerableTo(StatusId.MagicVulnerabilityUp)), ApplyStatus(StatusId.MagicVulnerabilityUp, 12f)),
+    ];
+
+    public static readonly EnemyAction SkywardLeap = new(ActionId.SkywardLeap)
+    {
+        Effects = [.. MagicVulnOnTarget, OnOthers(Damage(Lethal))],
+        Timing = new() { DamageDelay = 0.5f },
+        DeathExplanation = "caught in Skyward Leap; its target takes it alone, far from everyone",
+    };
+
+    public static readonly EnemyAction SpiralPierce = new(ActionId.SpiralPierce)
+    {
+        Effects = [.. MagicVulnOnTarget, OnOthers(Damage(Lethal))],
+        Timing = new() { DamageDelay = 0.63f },
+        DeathExplanation = "caught in a Spiral Pierce line; only the tethered player belongs in it",
+    };
+
+    // UNVERIFIED: the half-angle. Neighbours 20° apart around Thordan are never both hit.
+    public static readonly EnemyAction AscalonsMercyRevealedCone = new(ActionId.AscalonsMercyRevealedCone)
+    {
+        Area = new() { Size = 15f * MathF.PI / 180f },
+        Effects = [Damage(VulnerableTo(StatusId.PhysicalVulnerabilityUp)), ApplyStatus(StatusId.PhysicalVulnerabilityUp, 3f)],
+        Timing = new() { DamageDelay = 0.4f },
+        DeathExplanation = "took two Ascalon's Mercy cones; spread so each cone from Thordan hits only its own target",
+    };
+
+    public static readonly EnemyAction AltarFlarePuddle = new(ActionId.AltarFlarePuddle)
+    {
+        Effects = [Damage(Lethal)],
+        DeathExplanation = "stood in Altar Flare; each one lands where its target stood as it was cast, so keep moving",
+    };
+
+    public static readonly EnemyAction LiquidHeaven = new(ActionId.LiquidHeaven)
+    {
+        Cast = new() { AnimationLock = 0.1f },
+        Effects = [Damage()],
+        Timing = new() { DamageDelay = 2.2f },
+    };
+
+    public static readonly EnemyAction CauterizeDarkscale = new(ActionId.CauterizeDarkscale)
+    {
+        Effects = [Damage(Lethal)],
+        DeathExplanation = "hit by Cauterize; the dragons dive at where the marked player stood as they began",
+    };
+
+    public static readonly EnemyAction CauterizeVidofnir = CauterizeDarkscale with { ActionId = ActionId.CauterizeVidofnir };
+
+    public static readonly EnemyAction EmptyDimension = new(ActionId.EmptyDimension)
+    {
+        Area = new() { Size = 6f },
+        Effects = [Damage(Lethal)],
+        Timing = new() { DamageDelay = 0.5f },
+        DeathExplanation = "outside Empty Dimension's safe spot; stand close to Ser Grinnaux",
+    };
+
+    public static readonly EnemyAction ChainLightningBurst = new(ActionId.ChainLightningBurst)
+    {
+        Area = new() { CastTypeOverride = CastType.Circle },
+        Effects = [OnTarget(Damage()), OnOthers(Damage(Lethal))],
+        DeathExplanation = "too close to someone Thunderstruck when it went off",
     };
 }

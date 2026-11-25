@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using AnoMech.Scenarios.Dsr.P3Nidhogg;
 using AnoMech.Scenarios.Dsr.P4Eyes;
+using AnoMech.Scenarios.Dsr.P5Wrath;
 using AnoMech.Scenarios.Fru.P2DiamondDust;
 using AnoMech.Scenarios.Fru.P2LightRampant;
 using AnoMech.Scenarios.Fru.P3Apocalypse;
@@ -102,5 +103,6 @@ public sealed class ScenarioCatalog
         new UcobP5ExaflaresScenario(),
         new DsrP3NidhoggScenario(),
         new DsrP4EyesScenario(),
+        new DsrP5WrathScenario(),
     ]);
 }

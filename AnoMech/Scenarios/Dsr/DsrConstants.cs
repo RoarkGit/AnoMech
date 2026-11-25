@@ -16,6 +16,8 @@ public static class DsrConstants
         public const float P3ArenaHalfWidth = 21f;
         public static readonly Vector3 LeftEye = new(10f, 0f, 0f);
         public static readonly Vector3 RightEye = new(-10f, 0f, 0f);
+        // UNVERIFIED: players never get past about 20.8y from the middle.
+        public const float P5ArenaRadius = 21f;
     }
 
     // A-D on the cardinals, 1-4 on the intercardinals clockwise from NW.
@@ -48,6 +50,15 @@ public static class DsrConstants
         public const uint Haurchefant = 13117;
         public const uint Ysayle = 13118;
         public const uint Estinien = 13119;
+        public const uint KingThordan = 12611;
+        public const uint SerGrinnaux = 12602;
+        public const uint SerCharibert = 12603;
+        public const uint Darkscale = 12630;
+        public const uint Vidofnir = 12631;
+        public const uint SerVellguine = 12633;
+        public const uint SerPaulecrain = 12634;
+        public const uint SerIgnasse = 12635;
+        public const uint Vedrfolnir = 12646;
     }
 
     public static class BNpcNameId
@@ -62,6 +73,15 @@ public static class DsrConstants
         public const uint GildedPrice = 11316;
         public const uint LeftEye = 11317;
         public const uint RightEye = 11318;
+        public const uint KingThordan = 3632;
+        public const uint SerVellguine = 3636;
+        public const uint SerPaulecrain = 3637;
+        public const uint SerIgnasse = 3638;
+        public const uint SerGrinnaux = 3639;
+        public const uint SerCharibert = 3642;
+        public const uint Darkscale = 3983;
+        public const uint Vedrfolnir = 3984;
+        public const uint Vidofnir = 11314;
     }
 
     public static class ActionId
@@ -100,6 +120,22 @@ public static class DsrConstants
         public const uint MirageDive = 0x68C4;
         public const uint SoulOfFriendship = 0x68C5;
         public const uint SoulOfDevotion = 0x68C6;
+
+        public const uint EmptyDimension = 0x62DA;
+        public const uint AscalonsMercyRevealed = 0x63CA;
+        public const uint AscalonsMercyRevealedCone = 0x63CB;
+        public const uint AltarFlare = 0x63E4;
+        public const uint AltarFlarePuddle = 0x63E5;
+        public const uint WrathOfTheHeavens = 0x6B89;
+        public const uint SpiralPierce = 0x6B8A;
+        public const uint TwistingDive = 0x6B8B;
+        public const uint Twister = 0x6B8C;
+        public const uint CauterizeDarkscale = 0x6B8D;
+        public const uint CauterizeVidofnir = 0x6B8E;
+        public const uint ChainLightning = 0x6B8F;
+        public const uint ChainLightningBurst = 0x6B90;
+        public const uint LiquidHeaven = 0x6B91;
+        public const uint SkywardLeap = 0x72A2;
     }
 
     public static class StatusId
@@ -119,6 +155,9 @@ public static class DsrConstants
         public const ushort BoundAndDetermined = 2777;
         public const ushort Bleeding = 2951;
         public const ushort PiercingResistanceDown = 3131;
+        public const ushort Thunderstruck = 2833;
+        public const ushort MagicVulnerabilityUp = 2941;
+        public const ushort Burns = 2945;
     }
 
     public static class LockonId
@@ -126,6 +165,8 @@ public static class DsrConstants
         public const uint FirstInLine = 0x13F;
         public const uint SecondInLine = 0x140;
         public const uint ThirdInLine = 0x141;
+        public const uint SkywardLeap = 0x0E;
+        public const uint Cauterize = 0x14;
     }
 
     public static class TetherId
@@ -133,6 +174,14 @@ public static class DsrConstants
         public const ushort SoulTether = 84;
         public const ushort Fangbound = 51;
         public const ushort Clawbound = 52;
+        public const ushort SpiralPierce = 5;
+    }
+
+    public static class EObjId
+    {
+        public const uint Twister = 2001168;
+        // UNVERIFIED for DSR: UCOB's Liquid Hell puddle.
+        public const uint LiquidHeavenPuddle = 2001150;
     }
 
     // Spawn-packet parts for P4's human models, from their BNpcBase rows' NpcEquip and
@@ -148,6 +197,12 @@ public static class DsrConstants
         public static readonly NpcAppearance Estinien = new(MainHand: 0x100011F49,
             Equipment: [0x22391, 0x1239B, 0x1239B, 0x70024, 0x70024],
             Customize: [0x02, 0x00, 0x01, 0x32, 0x03, 0xD0, 0x05, 0x01, 0x4A, 0x06, 0xA1, 0x00, 0x00, 0x01, 0x02, 0x06, 0x81, 0x04, 0x00, 0x01, 0x00, 0x32, 0x01, 0x32, 0x00, 0x01]);
+        public static readonly NpcAppearance KingThordan = new(MainHand: 0x1002805DD, Equipment: [0x0, 0x20001]);
+        public static readonly NpcAppearance SerVellguine = new(MainHand: 0x4001401F5, Equipment: [0x10003, 0x10003, 0x0, 0x70001]);
+        public static readonly NpcAppearance SerPaulecrain = new(MainHand: 0x8000501F5, Equipment: [0x20003, 0x20003, 0x0, 0x80001]);
+        public static readonly NpcAppearance SerIgnasse = new(MainHand: 0x3000901F5, Equipment: [0x30003, 0x30003, 0x0, 0x90001]);
+        public static readonly NpcAppearance SerGrinnaux = new(MainHand: 0x500010194, Equipment: [0x10002, 0x10002, 0x0, 0x40001]);
+        public static readonly NpcAppearance SerCharibert = new(MainHand: 0x4000E03E9, Equipment: [0x10004, 0x10004, 0x0, 0xA0001]);
     }
 }
 

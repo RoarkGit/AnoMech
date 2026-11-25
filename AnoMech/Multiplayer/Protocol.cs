@@ -5,6 +5,7 @@ using AnoMech.Core.Game.Party;
 using AnoMech.Core.Native.Interfaces;
 using AnoMech.Core.SimObjects;
 using AnoMech.Scenarios.Dsr.P3Nidhogg;
+using AnoMech.Scenarios.Dsr.P4Eyes;
 using AnoMech.Scenarios.Top;
 using AnoMech.Scenarios.Umad.P1TeleTrouncing;
 using AnoMech.Scenarios.Umad.P2Forsaken;
@@ -63,6 +64,8 @@ namespace AnoMech.Multiplayer;
 [JsonDerivedType(typeof(TopP5DeltaBeyondDefenseUpdateMessage), "topP5DeltaBeyondDefenseUpdate")]
 [JsonDerivedType(typeof(DsrP3NidhoggAiReplayStateMessage), "dsrP3NidhoggAiReplayState")]
 [JsonDerivedType(typeof(DsrP3NidhoggDiveTowersUpdateMessage), "dsrP3NidhoggDiveTowersUpdate")]
+[JsonDerivedType(typeof(DsrP4EyesAiReplayStateMessage), "dsrP4EyesAiReplayState")]
+[JsonDerivedType(typeof(DsrP4EyesBoundUpdateMessage), "dsrP4EyesBoundUpdate")]
 [JsonDerivedType(typeof(TopP5OmegaHelloWorld2UpdateMessage), "topP5OmegaHelloWorld2Update")]
 [JsonDerivedType(typeof(PeerAppliedEnemyStatusMessage), "peerAppliedEnemyStatus")]
 [JsonDerivedType(typeof(PeerAppliedRoleStatusMessage), "peerAppliedRoleStatus")]
@@ -366,3 +369,8 @@ public sealed record DsrP3NidhoggAiReplayStateMessage(
 // Dive from Grace towers by order, as x,y,z triples, once each round's jumps land: they go where the
 // jumpers stood, which only the host knows.
 public sealed record DsrP3NidhoggDiveTowersUpdateMessage(Dictionary<int, float[]> Towers) : MpMessage, IScenarioMidRunUpdateMessage;
+
+public sealed record DsrP4EyesAiReplayStateMessage(
+    PartyRole[] ClawboundAtStart, PartyRole[][] DivePriority, PartyRole FriendshipTarget, PartyRole DevotionTarget) : MpMessage, IScenarioReplayStateMessage;
+
+public sealed record DsrP4EyesBoundUpdateMessage(Dictionary<PartyRole, BoundStatus> Bound) : MpMessage, IScenarioMidRunUpdateMessage;

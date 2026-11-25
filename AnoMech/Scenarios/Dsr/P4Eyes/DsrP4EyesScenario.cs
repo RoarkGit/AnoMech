@@ -8,6 +8,7 @@ using AnoMech.Core.Game.Ai;
 using AnoMech.Core.Game.Party;
 using AnoMech.Core.Native.Interfaces;
 using AnoMech.Core.SimObjects;
+using AnoMech.Multiplayer;
 using static AnoMech.Scenarios.Dsr.DsrConstants;
 using Actions = AnoMech.Scenarios.Dsr.DsrActions;
 
@@ -17,11 +18,12 @@ namespace AnoMech.Scenarios.Dsr.P4Eyes;
 // tethers that swap between two players who touch, and the four orbs only the Clawbound should
 // pop), the four rounds of Mirage Dive on random Clawbound, and Steep in Rage. The eyes die on HP
 // around Steep in Rage, so the enrage is left out.
-public sealed class DsrP4EyesScenario : IScenario
+public sealed class DsrP4EyesScenario : IMultiplayerReplayable
 {
     public string Name => "Eyes";
     public IPhase Phase => DsrZone.P4;
     public bool SupportsSolo => true;
+    public bool SupportsMultiplayer => true;
 
     public IReadOnlyList<IScenarioAi> AiStrats => [new DsrP4EyesAi()];
 
@@ -61,6 +63,9 @@ public sealed class DsrP4EyesScenario : IScenario
 
     private SimWorld world = null!;
     private DsrP4EyesState state = null!;
+    public DsrP4EyesState? LastState { get; private set; }
+    // Edge-triggers BuildMidRunUpdateMessage.
+    private bool boundChanged;
     private SimEnemy? leftEye;
     private SimEnemy? rightEye;
     private SimEnemy? estinien;
@@ -75,6 +80,8 @@ public sealed class DsrP4EyesScenario : IScenario
     {
         world = worldParam;
         state = new DsrP4EyesState(world.Rng, settingsWindow.Overrides);
+        LastState = state;
+        boundChanged = false;
         leftEye = rightEye = estinien = haurchefant = ysayle = null;
         orbs.Clear();
         tethers.Clear();
@@ -138,6 +145,22 @@ public sealed class DsrP4EyesScenario : IScenario
     {
         if (elapsed >= SwapsOpenAt) SwapTouchingTethers();
         PopTouchedOrbs(elapsed);
+        TrackBound();
+    }
+
+    private void TrackBound()
+    {
+        foreach (var role in Enum.GetValues<PartyRole>())
+        {
+            var now = world.Party.Get(role) is { } member
+                ? (member.HasStatus(StatusId.Clawbound) ? BoundStatus.Clawbound : 0)
+                  | (member.HasStatus(StatusId.Fangbound) ? BoundStatus.Fangbound : 0)
+                  | (member.HasStatus(StatusId.PiercingResistanceDown) ? BoundStatus.PiercingResistanceDown : 0)
+                : BoundStatus.None;
+            if (state.Bound.GetValueOrDefault(role) == now) continue;
+            state.Bound[role] = now;
+            boundChanged = true;
+        }
     }
 
     // Damage a Fangbound player takes heals the right eye, which the DPS check can't afford.
@@ -363,4 +386,34 @@ public sealed class DsrP4EyesScenario : IScenario
 
     private static float FlatDistance(Vector3 a, Vector3 b) =>
         Vector2.Distance(new Vector2(a.X, a.Z), new Vector2(b.X, b.Z));
+
+    public MpMessage? BuildReplayStateMessage()
+        => LastState is { } s
+            ? new DsrP4EyesAiReplayStateMessage(
+                s.ClawboundAtStart.ToArray(), s.DivePriority.Select(p => p.ToArray()).ToArray(), s.FriendshipTarget, s.DevotionTarget)
+            : null;
+
+    public object? StartReplay(MpMessage message, int aiIndex, PartyRole myRole, SimWorld replayWorld)
+    {
+        if (message is not DsrP4EyesAiReplayStateMessage msg || aiIndex < 0 || aiIndex >= AiStrats.Count) return null;
+        var shadowState = DsrP4EyesState.FromNetworkReplay(msg.ClawboundAtStart, msg.DivePriority, msg.FriendshipTarget, msg.DevotionTarget);
+        if (shadowState == null) return null;
+        ((IScenarioAi<DsrP4EyesState>)AiStrats[aiIndex]).Run(shadowState, replayWorld);
+        return shadowState;
+    }
+
+    public MpMessage? BuildMidRunUpdateMessage()
+    {
+        if (LastState is not { } s || !boundChanged) return null;
+        boundChanged = false;
+        return new DsrP4EyesBoundUpdateMessage(new Dictionary<PartyRole, BoundStatus>(s.Bound));
+    }
+
+    public void ApplyMidRunUpdate(object shadowStateObj, MpMessage message)
+    {
+        if (shadowStateObj is not DsrP4EyesState shadowState || message is not DsrP4EyesBoundUpdateMessage update) return;
+        shadowState.Bound.Clear();
+        foreach (var (role, status) in update.Bound)
+            if (Enum.IsDefined(role)) shadowState.Bound[role] = status & (BoundStatus.Clawbound | BoundStatus.Fangbound | BoundStatus.PiercingResistanceDown);
+    }
 }

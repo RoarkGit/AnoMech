@@ -16,6 +16,10 @@ public sealed class DsrZone : IZone
     // The eyes fight on P3's square floor. UNVERIFIED: P4's weather, taken to carry on from P3.
     public static readonly Phase P4 = new(Instance, "P4", 66, DsrConstants.BgmId.Contention,
         init: world => world.EnforceSquareArenaBoundary(DsrConstants.Geometry.P3ArenaHalfWidth, "Went past the arena's edge."));
+    // 2 shows the r1fz_b00 battle_stage03 floor; 59 (a cutscene weather) shows most of it too.
+    // UNVERIFIED: that it is P5's, and P5's BGM.
+    public static readonly Phase P5 = new(Instance, "P5", 2, 0,
+        init: world => world.EnforceArenaBoundary(DsrConstants.Geometry.P5ArenaRadius, "Went past the arena's edge."));
 
     public string Name => "Dragonsong's Reprise";
     public uint TerritoryId => 968;
